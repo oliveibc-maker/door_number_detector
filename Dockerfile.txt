@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+# Instalar Tesseract OCR
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-por \
+    tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copiar requirements e instalar dependências
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar código
+COPY . .
+
+# Variáveis de ambiente
+ENV PYTHONUNBUFFERED=1
+ENV GOOGLE_API_KEY=""
+ENV DB_HOST="localhost"
+ENV DB_PORT="1521"
+ENV DB_USER="system"
+ENV DB_PASSWORD=""
+ENV DB_NAME="xe"
+
+CMD ["python", "main.py"]
