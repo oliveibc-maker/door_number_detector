@@ -1,14 +1,13 @@
 import json
-import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from main import DoorNumberDetector
+from core.detector import DoorNumberDetector
 
 
 BASE_DIR = Path(__file__).resolve().parent
-HTML_PATH = BASE_DIR / "templates" / "index.html"
+HTML_PATH = BASE_DIR / "web" / "templates" / "index.html"
 
 detector = DoorNumberDetector()
 
