@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 class DoorNumberDetector:
     """Detects door numbers using Google Street View images and OCR."""
 
-    def __init__(self, config_path="config.ini"):
-        self.config = Config(config_path)
+    def __init__(self, env_path=".env"):
+        self.config = Config(env_path)
         self.db = DatabaseManager(self.config)
         self.street_view = StreetViewFetcher(self.config.google_api_key)
         logger.info("Door Number Detector initialized")
