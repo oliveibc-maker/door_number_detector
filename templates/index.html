@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Door Number Detector</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 760px; margin: 40px auto; padding: 20px; }
+    form { background: #f7f7f7; padding: 20px; border-radius: 8px; }
+    input, button { padding: 10px; margin-top: 8px; width: 100%; box-sizing: border-box; }
+    button { background: #2563eb; color: white; border: none; cursor: pointer; }
+    .result { margin-top: 20px; padding: 15px; background: #eefbf3; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 8px; border-bottom: 1px solid #ddd; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Door Number Detector</h1>
+  <p>Enter coordinates and run the detector.</p>
+
+  <form id="analyze-form">
+    <label>Latitude</label>
+    <input name="latitude" type="number" step="any" value="40.80082" required />
+
+    <label>Longitude</label>
+    <input name="longitude" type="number" step="any" value="-8.593741" required />
+
+    <label>Heading</label>
+    <input name="heading" type="number" value="0" />
+
+    <label>Pitch</label>
+    <input name="pitch" type="number" value="0" />
+
+    <button type="submit">Analyze</button>
+  </form>
+
+  <div id="result" class="result">No analysis run yet.</div>
+
+  <h2>Recent results</h2>
+  <table>
+    <thead>
+      <tr><th>Latitude</th><th>Longitude</th><th>Door number</th><th>Status</th></tr>
+    </thead>
+    <tbody id="results-body"></tbody>
+  </table>
+
+  <script>
+    const form = document.getElementById('analyze-form');
+    const resultBox = document.getElementById('result');
+    const resultsBody = document.getElementById('results-body');
+
+    async function loadResults() {
+      const response = await fetch('/api/results');
+      const data = await response.json();
+      resultsBody.innerHTML = '';
+      if (!data.length) {
+        resultsBody.innerHTML = '<tr><td colspan="4">No saved results yet.</td></tr>';
+        return;
+      }
+      data.forEach(item => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${item.latitude}</td>
+          <td>${item.longitude}</td>
+          <td>${item.door_number ?? '—'}</td>
+          <td>${item.status ?? 'unknown'}</td>`;
+        resultsBody.appendChild(row);
+      });
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const params = new URLSearchParams(formData);
+
+      resultBox.textContent = 'Analyzing...';
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: params.toString()
+      });
+      const data = await response.json();
+      resultBox.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+      loadResults();
+    });
+
+    loadResults();
+  </script>
+</body>
+</html>

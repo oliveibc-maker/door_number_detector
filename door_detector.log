@@ -1,0 +1,45 @@
+2026-06-29 14:28:00,985 - INFO - Conectando ao banco oracle...
+2026-06-29 14:28:01,023 - ERROR - Erro ao criar engine: Can't load plugin: sqlalchemy.dialects:oracle.cx_Oracle
+2026-06-29 14:28:01,023 - ERROR - Erro fatal: Can't load plugin: sqlalchemy.dialects:oracle.cx_Oracle
+Traceback (most recent call last):
+  File "/workspaces/door_number_detector/main.py", line 188, in main
+    detector = DoorNumberDetector()
+               ^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/door_number_detector/main.py", line 39, in __init__
+    self.db = DatabaseManager(self.config)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/door_number_detector/database.py", line 39, in __init__
+    self.engine = self._create_engine()
+                  ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/door_number_detector/database.py", line 60, in _create_engine
+    engine = create_engine(connection_string, echo=self.config.debug)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in create_engine
+  File "/home/codespace/.local/lib/python3.12/site-packages/sqlalchemy/util/deprecations.py", line 281, in warned
+    return fn(*args, **kwargs)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.local/lib/python3.12/site-packages/sqlalchemy/engine/create.py", line 568, in create_engine
+    entrypoint = u._get_entrypoint()
+                 ^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.local/lib/python3.12/site-packages/sqlalchemy/engine/url.py", line 772, in _get_entrypoint
+    cls = registry.load(name)
+          ^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.local/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 345, in load
+    raise exc.NoSuchModuleError(
+sqlalchemy.exc.NoSuchModuleError: Can't load plugin: sqlalchemy.dialects:oracle.cx_Oracle
+2026-06-29 14:29:36,017 - INFO - Conectando ao banco sqlite...
+2026-06-29 14:29:36,494 - INFO - Tabelas criadas/verificadas com sucesso
+2026-06-29 14:29:36,495 - INFO - Door Number Detector inicializado
+2026-06-29 14:29:36,496 - INFO - Processando coordenada: 40.80082, -8.593741
+2026-06-29 14:29:36,496 - INFO - Obtendo imagem para: 40.80082, -8.593741
+2026-06-29 14:29:36,609 - ERROR - Erro ao obter imagem: 403 Client Error: Forbidden for url: https://maps.googleapis.com/maps/api/streetview?location=40.80082%2C-8.593741&size=640x480&heading=0&pitch=0&fov=90&key=YOUR_GOOGLE_API_KEY_HERE
+2026-06-29 14:29:36,610 - WARNING - Não foi possível obter imagem para 40.80082, -8.593741
+2026-06-29 14:29:36,610 - INFO - Conexão com banco fechada
+2026-06-29 14:29:36,610 - INFO - Door Number Detector finalizado
+2026-06-29 14:32:29,075 - INFO - Conectando ao banco sqlite...
+2026-06-29 14:32:29,086 - INFO - Tabelas criadas/verificadas com sucesso
+2026-06-29 14:32:29,086 - INFO - Door Number Detector inicializado
+2026-06-29 14:32:41,229 - INFO - Processando coordenada: 40.80082, -8.593741
+2026-06-29 14:32:41,231 - INFO - Obtendo imagem para: 40.80082, -8.593741
+2026-06-29 14:32:41,302 - ERROR - Erro ao obter imagem: 403 Client Error: Forbidden for url: https://maps.googleapis.com/maps/api/streetview?location=40.80082%2C-8.593741&size=640x480&heading=0&pitch=0&fov=90&key=YOUR_GOOGLE_API_KEY_HERE
+2026-06-29 14:32:41,303 - WARNING - Não foi possível obter imagem para 40.80082, -8.593741

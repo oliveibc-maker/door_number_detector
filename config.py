@@ -27,12 +27,12 @@ class Config:
         }
         
         self.config['DATABASE'] = {
-            'type': 'oracle',  # oracle, postgresql, mysql, sqlite
+            'type': 'sqlite',  # oracle, postgresql, mysql, sqlite
             'host': os.getenv('DB_HOST', 'localhost'),
             'port': os.getenv('DB_PORT', '1521'),
             'user': os.getenv('DB_USER', 'system'),
             'password': os.getenv('DB_PASSWORD', ''),
-            'database': os.getenv('DB_NAME', 'xe'),
+            'database': os.getenv('DB_NAME', 'door_detector'),
             'sid': os.getenv('DB_SID', 'xe')
         }
         
