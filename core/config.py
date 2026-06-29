@@ -1,101 +1,61 @@
 """Project configuration management."""
 
-import configparser
 import os
+from dotenv import load_dotenv
 
 
 class Config:
-    """Manages application configuration."""
+    """Manages application configuration from .env file."""
 
-    def __init__(self, config_file="config.ini"):
-        self.config = configparser.ConfigParser()
-        self.config_file = config_file
-
-        if os.path.exists(config_file):
-            self.config.read(config_file)
-        else:
-            self._create_default_config()
-
-    def _create_default_config(self):
-        """Create a default configuration file."""
-        self.config["GOOGLE"] = {
-            "api_key": os.getenv("GOOGLE_API_KEY", "YOUR_API_KEY_HERE"),
-            "street_view_size": "640x480",
-        }
-
-        self.config["DATABASE"] = {
-            "type": "sqlite",
-            "host": os.getenv("DB_HOST", "localhost"),
-            "port": os.getenv("DB_PORT", "1521"),
-            "user": os.getenv("DB_USER", "system"),
-            "password": os.getenv("DB_PASSWORD", ""),
-            "database": os.getenv("DB_NAME", "door_detector"),
-            "sid": os.getenv("DB_SID", "xe"),
-        }
-
-        self.config["OCR"] = {
-            "tesseract_path": os.getenv("TESSERACT_PATH", "/usr/bin/tesseract"),
-            "language": "por+eng",
-            "confidence_threshold": "70",
-        }
-
-        self.config["APP"] = {
-            "debug": "False",
-            "log_level": "INFO",
-            "max_retries": "3",
-        }
-
-        self._save_config()
-
-    def _save_config(self):
-        """Save configuration to disk."""
-        with open(self.config_file, "w", encoding="utf-8") as file_handle:
-            self.config.write(file_handle)
+    def __init__(self, env_file=".env"):
+        """Load configuration from .env file."""
+        # Load environment variables from .env file (override existing)
+        load_dotenv(env_file, override=True)
 
     @property
     def google_api_key(self):
-        return self.config.get("GOOGLE", "api_key")
+        return os.getenv("GOOGLE_API_KEY", "YOUR_API_KEY_HERE")
 
     @property
     def street_view_size(self):
-        return self.config.get("GOOGLE", "street_view_size")
+        return os.getenv("STREET_VIEW_SIZE", "640x480")
 
     @property
     def db_type(self):
-        return self.config.get("DATABASE", "type").lower()
+        return os.getenv("DATABASE_TYPE", "sqlite").lower()
 
     @property
     def db_host(self):
-        return self.config.get("DATABASE", "host")
+        return os.getenv("DATABASE_HOST", "localhost")
 
     @property
     def db_port(self):
-        return self.config.getint("DATABASE", "port")
+        return int(os.getenv("DATABASE_PORT", "1521"))
 
     @property
     def db_user(self):
-        return self.config.get("DATABASE", "user")
+        return os.getenv("DATABASE_USER", "system")
 
     @property
     def db_password(self):
-        return self.config.get("DATABASE", "password")
+        return os.getenv("DATABASE_PASSWORD", "")
 
     @property
     def db_name(self):
-        return self.config.get("DATABASE", "database")
+        return os.getenv("DATABASE_NAME", "door_detector")
 
     @property
     def db_sid(self):
-        return self.config.get("DATABASE", "sid")
+        return os.getenv("DATABASE_SID", "xe")
 
     @property
     def tesseract_path(self):
-        return self.config.get("OCR", "tesseract_path")
+        return os.getenv("TESSERACT_PATH", "/usr/bin/tesseract")
 
     @property
     def ocr_language(self):
-        return self.config.get("OCR", "language")
+        return os.getenv("OCR_LANGUAGE", "por+eng")
 
     @property
     def debug(self):
-        return self.config.getboolean("APP", "debug")
+        return os.getenv("DEBUG", "False").lower() == "true"
