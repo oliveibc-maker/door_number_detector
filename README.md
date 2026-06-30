@@ -116,3 +116,14 @@ Then open http://127.0.0.1:8000 in your browser to use the web interface.
 - The application writes logs to [door_detector.log](door_detector.log).
 - Configuration is loaded from `.env` file (copy from `.env.example`).
 - Generated build artifacts and local data are ignored by [.gitignore](.gitignore).
+
+
+NOTAS
+
+Tesseract wasnt detecting the digits
+
+easyocr is having some problems in some cases
+
+will try paddle next that seems better
+
+references: https://toon-beerten.medium.com/ocr-comparison-tesseract-versus-easyocr-vs-paddleocr-vs-mmocr-a362d9c79e66
