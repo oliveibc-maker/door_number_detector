@@ -18,7 +18,7 @@ class Config:
 
     @property
     def street_view_size(self):
-        return os.getenv("STREET_VIEW_SIZE", "640x480")
+        return os.getenv("STREET_VIEW_SIZE", "640x640")
 
     @property
     def db_type(self):
@@ -50,11 +50,15 @@ class Config:
 
     @property
     def tesseract_path(self):
-        return os.getenv("TESSERACT_PATH", "/usr/bin/tesseract")
+        return os.getenv("TESSERACT_PATH")
 
     @property
     def ocr_language(self):
         return os.getenv("OCR_LANGUAGE", "por+eng")
+
+    @property
+    def confidence_threshold(self):
+        return int(os.getenv("CONFIDENCE_THRESHOLD", "70"))
 
     @property
     def debug(self):

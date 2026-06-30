@@ -30,13 +30,32 @@ brew install tesseract
 Windows:
 - Download the installer from the Tesseract GitHub releases page.
 
+> Note: Tesseract OCR itself is a native executable and must be installed on your system.
+> The Python package `pytesseract` is included in `requirements.txt`, but it only provides the Python bindings.
+> You still need the Tesseract engine installed separately.
+> On Windows, set `TESSERACT_PATH` in `.env` to the full path to `tesseract.exe`, for example:
+> `TESSERACT_PATH=C:\Users\mafapereira\AppData\Local\Programs\Tesseract-OCR\tesseract.exe`
+> On Linux/macOS, either install `tesseract` globally or ensure it is on `PATH`.
+
 ## Setup & Getting Started
 
 ### Step 1: Activate virtual environment and install dependencies
 
 Activate the virtual environment:
 ```bash
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # On Windows PowerShell: .\.venv\Scripts\Activate.ps1
+                           # On Windows CMD: .venv\Scripts\activate.bat
+```
+
+If PowerShell blocks script execution, run:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+If `python` still resolves to the Windows Store alias, use the real installed interpreter path instead, for example:
+```powershell
+& "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe" -m venv .venv
 ```
 
 Install Python dependencies:

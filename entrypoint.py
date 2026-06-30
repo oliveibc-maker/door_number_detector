@@ -5,7 +5,14 @@ from core.detector import DoorNumberDetector
 
 def main():
     detector = DoorNumberDetector()
-    result = detector.detect_door_number(40.80082, -8.593741)
+    latitude, longitude = 41.256331, -8.645468
+    image = detector.street_view.get_image(latitude, longitude)
+
+    if image is not None:
+        print("Displaying fetched Street View image...")
+        image.show()
+
+    result = detector.detect_door_number(latitude, longitude, image=image)
 
     print("\n" + "=" * 50)
     print("DETECTION RESULT")
