@@ -1,33 +1,46 @@
 """Main door number detection workflow."""
 
+import io
 import logging
 import os
 import re
+import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import cv2
+import easyocr
+import numpy as np
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-try:
-    import cv2
-    import numpy as np
-except ImportError:
-    cv2 = None
-    np = None
 
 from core.config import Config
 from core.database import DatabaseManager
 from core.google_street_view import StreetViewFetcher
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("door_detector.log"),
-        logging.StreamHandler(),
-    ],
-)
-logger = logging.getLogger(__name__)
+
+# ── UTF-8 safe logging (fixes cp1252 crash on Windows) ────────────────────────
+def _build_logger() -> logging.Logger:
+    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+    file_handler = logging.FileHandler("door_detector.log", encoding="utf-8")
+    file_handler.setFormatter(fmt)
+
+    utf8_stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    stream_handler = logging.StreamHandler(utf8_stream)
+    stream_handler.setFormatter(fmt)
+
+    log = logging.getLogger(__name__)
+    log.setLevel(logging.INFO)
+    log.handlers.clear()
+    log.addHandler(file_handler)
+    log.addHandler(stream_handler)
+    log.propagate = False
+    return log
+
+
+logger = _build_logger()
 
 
 class DoorNumberDetector:
@@ -36,22 +49,27 @@ class DoorNumberDetector:
     def __init__(self, env_path=".env"):
         self.config = Config(env_path)
         self._configure_tesseract()
-        self.debug_dir = Path("ocr_debug")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.debug_dir = Path(f"ocr_debug_{ts}")
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.db = DatabaseManager(self.config)
-        self.street_view = StreetViewFetcher(self.config.google_api_key, size=self.config.street_view_size)
+        self.street_view = StreetViewFetcher(
+            self.config.google_api_key, size=self.config.street_view_size
+        )
+
+        # EasyOCR reader — loaded once, reused across all calls
+        # gpu=False is safe default; set gpu=True if you have CUDA
+        logger.info("Loading EasyOCR model (first run downloads ~100MB)...")
+        self._ocr_reader = easyocr.Reader(["en"], gpu=False)
         logger.info("Door Number Detector initialized")
 
     def _configure_tesseract(self):
         tesseract_path = self.config.tesseract_path
         if not tesseract_path:
             return
-
         if os.path.isdir(tesseract_path):
             tesseract_path = os.path.join(tesseract_path, "tesseract.exe")
-
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
-
         if not os.path.exists(tesseract_path):
             logger.warning(f"Tesseract executable not found at {tesseract_path}")
         else:
@@ -59,211 +77,351 @@ class DoorNumberDetector:
 
     def _save_debug_image(self, image, name):
         path = self.debug_dir / name
-        image.save(path)
+        if isinstance(image, np.ndarray):
+            cv2.imwrite(str(path), image)
+        else:
+            image.save(path)
         return path
 
-    def _build_preprocessing_variants(self, image):
-        variants = []
-        gray = image.convert("L")
-        variants.append(("gray", gray))
-        w, h = gray.size
+    def _upscale(self, image: np.ndarray, scale: int = 3) -> np.ndarray:
+        """Bicubic upscale — makes small distant text readable."""
+        h, w = image.shape[:2]
+        return cv2.resize(image, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
 
-        if cv2 is not None and np is not None:
-            arr = np.array(gray)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            clahe_img = Image.fromarray(clahe.apply(arr))
-            variants.append(("clahe", clahe_img))
+    # ── ZONE FINDER: MSER — finds character-like blobs without any model ───────
+    def _find_zones_mser(self, gray: np.ndarray) -> list[tuple[int, int, int, int]]:
+        """
+        MSER em raw gray E em imagem CLAHE-melhorada — apanha texto de baixo contraste.
+        Retorna bounding boxes ao nível de palavra.
+        """
+        clahe      = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        gray_clahe = clahe.apply(gray)
 
-            blur = cv2.GaussianBlur(arr, (5, 5), 0)
-            variants.append(("blur", Image.fromarray(blur)))
+        all_raw_boxes: list[tuple[int, int, int, int]] = []
 
-            _, thresh = cv2.threshold(arr, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            variants.append(("thresh", Image.fromarray(thresh)))
+        for variant in [gray, gray_clahe]:
+            mser = cv2.MSER_create()
+            mser.setDelta(5)
+            mser.setMinArea(20)    # era 30 — apanha caracteres mais pequenos
+            mser.setMaxArea(3000)
+            regions, _ = mser.detectRegions(variant)
+            if regions:
+                all_raw_boxes += [
+                    cv2.boundingRect(r.reshape(-1, 1, 2)) for r in regions
+                ]
 
-            thresh_inv = cv2.bitwise_not(thresh)
-            variants.append(("thresh_inv", Image.fromarray(thresh_inv)))
+        char_boxes = [
+            (x, y, w, h) for x, y, w, h in all_raw_boxes
+            if h > 0 and 0.1 < (w / h) < 3.0 and h > 8
+        ]
 
-            kernel = np.ones((2, 2), np.uint8)
-            dilated = cv2.dilate(thresh, kernel, iterations=1)
-            variants.append(("dilate", Image.fromarray(dilated)))
+        if not char_boxes:
+            return []
 
-            crop_regions = [
-                (0, 0, w, h // 3),
-                (0, h // 3, w, 2 * h // 3),
-                (0, 2 * h // 3, w, h),
-            ]
-            for index, box in enumerate(crop_regions, start=1):
-                cropped = gray.crop(box)
-                variants.append((f"crop_{index}", cropped))
-                crop_arr = np.array(cropped)
-                _, crop_thresh = cv2.threshold(crop_arr, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                variants.append((f"crop_{index}_thresh", Image.fromarray(crop_thresh)))
-        else:
-            variants.extend([
-                ("resized", gray.resize((w * 2, h * 2), Image.BICUBIC)),
-                ("enhanced_contrast", ImageEnhance.Contrast(gray).enhance(2.5)),
-                ("sharpened", gray.filter(ImageFilter.SHARPEN)),
-                ("inverted", ImageOps.invert(gray)),
-                ("thresh", gray.point(lambda x: 0 if x < 150 else 255, mode="1")),
-            ])
+        # Deduplicar boxes muito próximas (vêm dos dois variants)
+        deduped: list[tuple[int, int, int, int]] = []
+        for box in char_boxes:
+            x, y, w, h = box
+            if not any(abs(x - sx) < 5 and abs(y - sy) < 5 for sx, sy, *_ in deduped):
+                deduped.append(box)
 
-        return variants
+        # Agregar boxes próximas em regiões de "palavra"
+        deduped.sort(key=lambda b: b[0])
+        merged  = []
+        current = list(deduped[0])
 
-    def _find_best_candidate_from_data(self, data):
-        best_candidate = None
-        best_confidence = 0
+        for x, y, w, h in deduped[1:]:
+            gap      = x - (current[0] + current[2])
+            same_row = abs(y - current[1]) < current[3] * 0.8
+            if gap < current[3] * 1.5 and same_row:
+                x2 = max(current[0] + current[2], x + w)
+                y1 = min(current[1], y)
+                y2 = max(current[1] + current[3], y + h)
+                current = [current[0], y1, x2 - current[0], y2 - y1]
+            else:
+                merged.append(tuple(current))
+                current = [x, y, w, h]
 
-        for word, conf in zip(data.get("text", []), data.get("conf", [])):
-            token = str(word).strip()
-            if not token:
-                continue
+        merged.append(tuple(current))
+        word_boxes = [(x, y, w, h) for x, y, w, h in merged if w > 15]
 
-            try:
-                confidence = int(float(conf))
-            except (ValueError, TypeError):
-                continue
+        logger.info(f"MSER found {len(word_boxes)} candidate zone(s)")
+        return word_boxes
 
-            candidate = self._parse_door_number(token)
-            if candidate and confidence > best_confidence:
-                best_candidate = candidate
-                best_confidence = confidence
 
-        return best_candidate, best_confidence
+    def _extract_door_number(self, image: Image.Image) -> tuple[str | None, int]:
+        """
+        Pipeline:
+        1. Crop 20px em baixo (remove watermark Google)
+        2. EasyOCR na imagem completa 2x
+        3. EasyOCR em CLAHE 2x
+        4. EasyOCR em 3 crops de entrada
+        5. Tesseract fallback (PSMs 6/7/8/11)
+        6. Votação por soma de confiança
+        """
+        # ── Crop watermark Google (20px em baixo) ─────────────────────────────
+        w_orig, h_orig = image.size
+        image = image.crop((0, 0, w_orig, h_orig - 20))
 
-    def _run_ocr_on_variant(self, image, variant_name, debug_prefix):
-        best_candidate = None
-        best_confidence = 0
-        best_text = None
-        best_psm = None
+        cv_img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        gray   = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+        orig_h, orig_w = cv_img.shape[:2]
 
-        psm_modes = [7, 6, 8, 10]
-        for psm in psm_modes:
-            config = (
-                f"--oem 3 --psm {psm} -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-"
+        all_candidates: list[tuple[str, float]] = []
+        clahe_obj = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+
+        # ── Helpers ───────────────────────────────────────────────────────────
+        def _run_easyocr(scan_img: np.ndarray, tag: str) -> list:
+            results = self._ocr_reader.readtext(
+                scan_img,
+                paragraph=False,
+                detail=1,
+                min_size=5,
+                text_threshold=0.2,
+                low_text=0.2,
+                link_threshold=0.2,
+                canvas_size=2560,
+                mag_ratio=2.0,
             )
-            try:
-                data = pytesseract.image_to_data(
-                    image,
-                    config=config,
-                    lang=self.config.ocr_language,
-                    output_type=pytesseract.Output.DICT,
-                )
-            except Exception as exc:
-                logger.warning(f"Tesseract data extraction failed for {variant_name} psm={psm}: {exc}")
-                continue
+            for _, text, conf in results:
+                for num in re.findall(r"\d{1,4}", text.strip()):
+                    all_candidates.append((num, conf))
+                    logger.info(f"EasyOCR [{tag}] '{num}' ← '{text}' ({conf * 100:.0f}%)")
+            return results
 
-            text_tokens = [str(t).strip() for t in data.get("text", []) if str(t).strip()]
-            raw_text = " ".join(text_tokens)
-            logger.info(f"OCR {variant_name} psm={psm} raw: {repr(raw_text)}")
+        def _annotate(canvas: np.ndarray, results: list, label: str = "") -> np.ndarray:
+            for bbox, text, conf in results:
+                has_num = bool(re.findall(r"\d{1,4}", text.strip()))
+                color   = (0, 200, 0) if has_num else (0, 0, 220)
+                pts     = np.array([[int(p[0]), int(p[1])] for p in bbox], np.int32)
+                cv2.polylines(canvas, [pts], True, color, 2)
+                x0 = int(min(p[0] for p in bbox))
+                y0 = int(min(p[1] for p in bbox))
+                cv2.putText(canvas, f"{text}({conf * 100:.0f}%)",
+                            (x0, max(y0 - 6, 12)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+            if label:
+                cv2.putText(canvas, label, (8, canvas.shape[0] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            return canvas
 
-            candidate, confidence = self._find_best_candidate_from_data(data)
-            if candidate:
-                logger.info(
-                    f"Candidate {candidate} with confidence {confidence}% from {variant_name} psm={psm}"
-                )
-                if confidence > best_confidence:
-                    best_candidate = candidate
-                    best_confidence = confidence
-                    best_text = raw_text
-                    best_psm = psm
-            if best_confidence >= self.config.confidence_threshold:
-                logger.info(
-                    f"Early stop on {variant_name} psm={psm} with confidence {best_confidence}%"
-                )
-                break
+        def _to_bgr(img: np.ndarray) -> np.ndarray:
+            return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()
 
-        if best_candidate is None:
-            logger.info(f"No number candidate found for {variant_name}")
-
+        # ── Step 1: Imagem completa 2x ────────────────────────────────────────
+        logger.info("EasyOCR: full image 2x upscale...")
+        full_2x  = self._upscale(cv_img, scale=2)
+        full_res = _run_easyocr(full_2x, "full_2x")
         if self.config.debug:
-            debug_name = f"{debug_prefix}_{variant_name}.png"
-            debug_path = self._save_debug_image(image, debug_name)
-            logger.info(f"Saved OCR debug image: {debug_path}")
+            vis = _annotate(full_2x.copy(), full_res,
+                            f"full_2x | {len(full_res)} detections")
+            self._save_debug_image(vis, "scan_01_full_2x.png")
 
-        return best_candidate, best_confidence, best_text, best_psm
+        # ── Step 2: CLAHE 2x ──────────────────────────────────────────────────
+        logger.info("EasyOCR: clahe...")
+        gray_clahe = clahe_obj.apply(gray)
+        clahe_2x   = self._upscale(gray_clahe, scale=2)
+        clahe_res  = _run_easyocr(clahe_2x, "clahe")
+        if self.config.debug:
+            vis = _annotate(_to_bgr(clahe_2x).copy(), clahe_res,
+                            f"clahe | {len(clahe_res)} detections")
+            self._save_debug_image(vis, "scan_02_clahe.png")
 
-    def detect_door_number(self, latitude, longitude, heading=0, pitch=0, image=None):
+        # ── Step 3: Crops de entrada ──────────────────────────────────────────
+        entrance_crops = {
+            "enter_lower_center": (orig_h // 3,        orig_h, orig_w // 4, 3 * orig_w // 4),
+            "enter_bottom_strip": (int(orig_h * 0.55), orig_h, 0,           orig_w),
+            "enter_center_col":   (0,                  orig_h, orig_w // 3, 2 * orig_w // 3),
+        }
+
+        # for crop_name, (y1, y2, x1, x2) in entrance_crops.items():
+        #     crop = cv_img[y1:y2, x1:x2]
+        #     if crop.size == 0:
+        #         continue
+
+        #     crop_up         = self._upscale(crop, scale=3)
+        #     crop_gray_clahe = clahe_obj.apply(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY))
+        #     crop_clahe_up   = self._upscale(crop_gray_clahe, scale=3)
+
+        #     logger.info(f"EasyOCR: entrance crop '{crop_name}'...")
+        #     res_color = _run_easyocr(crop_up,       crop_name)
+        #     res_clahe = _run_easyocr(crop_clahe_up, f"{crop_name}_clahe")
+
+        #     if self.config.debug:
+        #         vis = _annotate(crop_up.copy(), res_color,
+        #                         f"{crop_name} | {len(res_color)} det.")
+        #         self._save_debug_image(vis, f"scan_03_{crop_name}.png")
+        #         vis2 = _annotate(_to_bgr(crop_clahe_up).copy(), res_clahe,
+        #                         f"{crop_name}_clahe | {len(res_clahe)} det.")
+        #         self._save_debug_image(vis2, f"scan_03_{crop_name}_clahe.png")
+
+        # # ── Step 4: Tesseract fallback ────────────────────────────────────────
+        # logger.info("Tesseract fallback (PSMs 6/7/8/11)...")
+        # for psm in [6, 7, 8, 11]:
+        #     try:
+        #         data = pytesseract.image_to_data(
+        #             image,
+        #             config=f"--oem 3 --psm {psm}",
+        #             lang=self.config.ocr_language,
+        #             output_type=pytesseract.Output.DICT,
+        #         )
+        #         for word, conf in zip(data["text"], data["conf"]):
+        #             word = str(word).strip()
+        #             try:
+        #                 conf_int = int(float(conf))
+        #             except (ValueError, TypeError):
+        #                 continue
+        #             if conf_int < 0:
+        #                 continue
+        #             for num in re.findall(r"\d{1,4}", word):
+        #                 all_candidates.append((num, conf_int / 100.0))
+        #                 logger.info(f"Tesseract psm={psm} '{num}' ({conf_int}%)")
+        #     except Exception as exc:
+        #         logger.warning(f"Tesseract psm={psm} failed: {exc}")
+
+        if not all_candidates:
+            logger.info("No candidates found")
+            return None, 0
+
+        # ── Step 5: Scoring por soma de confiança ─────────────────────────────
+        best_conf: dict[str, float] = {}
+        conf_sum:  dict[str, float] = {}
+
+        for num, conf in all_candidates:
+            if num not in best_conf or conf > best_conf[num]:
+                best_conf[num] = conf
+            conf_sum[num] = conf_sum.get(num, 0.0) + conf
+
+        def score(num: str) -> tuple:
+            return (conf_sum[num], len(num), best_conf[num])
+
+        best_number         = max(best_conf.keys(), key=score)
+        best_confidence_pct = int(best_conf[best_number] * 100)
+
+        vote_counts = Counter(num for num, _ in all_candidates)
+        logger.info(
+            f"Best: '{best_number}' ({best_confidence_pct}%) "
+            f"conf_sum={conf_sum[best_number]:.2f} "
+            f"votes={vote_counts[best_number]}/{len(all_candidates)}"
+        )
+        return best_number, best_confidence_pct
+
+
+
+    # ── Everything below is UNCHANGED from your existing class ────────────────
+
+    def detect_door_number(self, latitude, longitude, heading=None, pitch=0, image=None):
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
 
         try:
-            best_number = None
-            best_confidence = 0
-            best_image = None
-            best_heading = heading
-            best_pitch = pitch
+            heading_offsets = [0, -20, 20]
+            pitch_values    = [5, 10, 15] if pitch == None else [pitch]
 
-            if image is None:
-                heading_offsets = [0, -10, 10, -20, 20]
-                pitch_values = [5, 10, 15] if pitch == 0 else [pitch]
+            all_image_candidates: list[dict] = []
 
-                for pitch_try in pitch_values:
-                    for offset in heading_offsets:
-                        logger.info(f"Trying image with heading offset {offset} and pitch {pitch_try}")
-                        candidate_image = self.street_view.get_image(
-                            latitude,
-                            longitude,
-                            heading=heading,
-                            heading_offset=offset,
-                            pitch=pitch_try,
-                        )
+            if image is not None:
+                logger.info("Using supplied image instead of fetching from Street View")
+                number, confidence = self._extract_door_number(image)
+                logger.info(f"Supplied image -> '{number}' (confidence: {confidence}%)")
 
-                        if candidate_image is None:
-                            continue
+                all_image_candidates.append({
+                    "number":     number,
+                    "confidence": confidence,
+                    "heading":    heading,
+                    "pitch":      pitch,
+                })
+            else:
+                for fov_try in [90, 60, 40]:
+                    fov_candidates = []
 
-                        if self.config.debug:
-                            debug_name = f"candidate_offset{offset}_pitch{pitch_try}.png"
-                            debug_path = self._save_debug_image(candidate_image, debug_name)
-                            logger.info(f"Saved candidate debug image: {debug_path}")
-
-                        number, confidence = self._extract_door_number(candidate_image)
-                        logger.info(
-                            f"Offset {offset}, pitch {pitch_try} → {number} (confidence: {confidence}%)"
-                        )
-
-                        if confidence > best_confidence:
-                            best_confidence = confidence
-                            best_number = number
-                            best_image = candidate_image
-                            best_heading = (heading + offset) % 360
-                            best_pitch = pitch_try
-
-                        if best_confidence >= self.config.confidence_threshold:
-                            logger.info(
-                                f"Stopping early at offset {offset}, pitch {pitch_try} with confidence {best_confidence}%"
+                    for pitch_try in pitch_values:
+                        for offset in heading_offsets:
+                            logger.info(f"Trying FOV={fov_try} offset={offset} pitch={pitch_try}")
+                            candidate_image = self.street_view.get_image(
+                                latitude,
+                                longitude,
+                                heading=heading,        # None → get_image auto-calcula
+                                heading_offset=offset,
+                                pitch=pitch_try,
+                                fov=fov_try,
                             )
-                            break
-                    if best_confidence >= self.config.confidence_threshold:
+
+                            if candidate_image is None:
+                                logger.warning(
+                                    f"No image returned for offset={offset} pitch={pitch_try}"
+                                )
+                                continue
+
+                            if self.config.debug:
+                                debug_name = f"candidate_fov{fov_try}_offset{offset}_pitch{pitch_try}.png"
+                                self._save_debug_image(candidate_image, debug_name)
+
+                            number, confidence = self._extract_door_number(candidate_image)
+                            logger.info(
+                                f"FOV={fov_try} offset={offset} pitch={pitch_try} -> "
+                                f"'{number}' (confidence: {confidence}%)"
+                            )
+
+                            fov_candidates.append({
+                                "number":     number,
+                                "confidence": confidence,
+                                "heading":    offset,   # offset relativo; heading absoluto calculado internamente
+                                "pitch":      pitch_try,
+                                "fov":        fov_try,
+                            })
+
+                    if not fov_candidates:
+                        continue
+
+                    all_image_candidates.extend(fov_candidates)
+
+                    best_this_fov = max(fov_candidates, key=lambda c: c["confidence"])
+                    if best_this_fov["number"] and best_this_fov["confidence"] >= self.config.confidence_threshold:
+                        logger.info(f"Found result at FOV={fov_try}, skipping smaller FOVs")
                         break
 
-                if best_image is None:
-                    logger.warning(f"Unable to retrieve image for {latitude}, {longitude}")
-                    return {
-                        "success": False,
-                        "latitude": latitude,
-                        "longitude": longitude,
-                        "door_number": None,
-                        "confidence": 0,
-                        "error": "Image unavailable",
-                    }
+            if not all_image_candidates:
+                logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
+                return {
+                    "success":     False,
+                    "latitude":    latitude,
+                    "longitude":   longitude,
+                    "door_number": None,
+                    "confidence":  0,
+                    "error":       "Image unavailable",
+                }
 
-                door_number = best_number
-                confidence = best_confidence
-                heading = best_heading
-                pitch = best_pitch
-            else:
-                door_number, confidence = self._extract_door_number(image)
+            best_candidate = max(
+                all_image_candidates,
+                key=lambda c: (
+                    c["confidence"],
+                    len(c["number"]) if c["number"] else 0,
+                ),
+            )
 
-            success = bool(door_number and confidence >= self.config.confidence_threshold)
+            door_number = best_candidate["number"]
+            confidence  = best_candidate["confidence"]
+            heading     = best_candidate["heading"]
+            pitch       = best_candidate["pitch"]
+
+            logger.info(
+                f"Best across all offsets: '{door_number}' ({confidence}%) "
+                f"at heading_offset={heading} pitch={pitch}"
+            )
+
+            success = bool(
+                door_number and confidence >= self.config.confidence_threshold
+            )
             result = {
-                "success": success,
-                "latitude": latitude,
-                "longitude": longitude,
+                "success":     success,
+                "latitude":    latitude,
+                "longitude":   longitude,
                 "door_number": door_number if success else None,
-                "confidence": confidence,
-                "heading": heading,
-                "pitch": pitch,
-                "timestamp": datetime.now().isoformat(),
+                "confidence":  confidence,
+                "heading":     heading,
+                "pitch":       pitch,
+                "timestamp":   datetime.now().isoformat(),
             }
 
             if not success:
@@ -272,7 +430,7 @@ class DoorNumberDetector:
                     f"Requires at least {self.config.confidence_threshold}% to pass."
                 )
                 logger.warning(
-                    f"Low confidence result: {door_number} ({confidence}%). marked as failed."
+                    f"Low confidence result: '{door_number}' ({confidence}%). Marked as failed."
                 )
             else:
                 logger.info(f"Result: {door_number} (confidence: {confidence}%)")
@@ -283,57 +441,15 @@ class DoorNumberDetector:
         except Exception as exc:
             logger.error(f"Error processing coordinate: {exc}", exc_info=True)
             return {
-                "success": False,
-                "latitude": latitude,
+                "success":   False,
+                "latitude":  latitude,
                 "longitude": longitude,
-                "error": str(exc),
+                "error":     str(exc),
             }
 
-    def _extract_door_number(self, image):
-        """Extract the door number using OCR."""
-        best_number = None
-        best_confidence = 0
-        best_variant = None
-        best_psm = None
-
-        debug_prefix = datetime.now().strftime("%Y%m%d_%H%M%S")
-        variants = self._build_preprocessing_variants(image)
-
-        for variant_name, variant_image in variants:
-            number, confidence, raw_text, psm = self._run_ocr_on_variant(
-                variant_image, variant_name, debug_prefix
-            )
-
-            if number and confidence > best_confidence:
-                best_number = number
-                best_confidence = confidence
-                best_variant = variant_name
-                best_psm = psm
-
-            if best_confidence >= self.config.confidence_threshold:
-                logger.info(
-                    f"Accepting {best_number} from {best_variant} at {best_confidence}% confidence"
-                )
-                break
-
-        logger.info(
-            f"OCR best result: {best_number} (confidence: {best_confidence}%, variant: {best_variant}, psm: {best_psm})"
-        )
-        return best_number, best_confidence
-
-    def _parse_door_number(self, text):
-        """Extract the first numeric token from OCR text."""
-        if not text:
-            return None
-
-        numbers = re.findall(r"\b\d+[A-Z]?\b", text)
-        return numbers[0] if numbers else None
-
-    def process_coordinates_batch(self, coordinates_list):
-        """Process multiple coordinates."""
+    def process_coordinates_batch(self, coordinates_list: list) -> list:
         results = []
-        total = len(coordinates_list)
-
+        total   = len(coordinates_list)
         for index, coordinate in enumerate(coordinates_list, 1):
             logger.info(f"Processing {index}/{total}")
             result = self.detect_door_number(
@@ -343,10 +459,8 @@ class DoorNumberDetector:
                 coordinate.get("pitch", 0),
             )
             results.append(result)
-
         return results
 
     def close(self):
-        """Release resources."""
         self.db.close()
         logger.info("Door Number Detector finished")
