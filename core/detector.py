@@ -1,8 +1,12 @@
 """Main door number detection workflow."""
 
+import os
+os.environ["FLAGS_use_mkldnn"] = "0"   # disables oneDNN — fixes Windows crash
+os.environ["PADDLE_DISABLE_MKLDNN"] = "1"
+os.environ["FLAGS_enable_pir_in_executor"] = "0"  # disables PIR execution path on Windows
+
 import io
 import logging
-import os
 import re
 import sys
 from collections import Counter
@@ -10,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import easyocr
 import numpy as np
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
@@ -50,18 +53,43 @@ class DoorNumberDetector:
         self.config = Config(env_path)
         self._configure_tesseract()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.debug_dir = Path(f"ocr_debug_{ts}")
+        self.debug_root = Path("ocr_debug")
+        self.debug_root.mkdir(parents=True, exist_ok=True)
+        self.debug_dir = self.debug_root / ts
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.db = DatabaseManager(self.config)
         self.street_view = StreetViewFetcher(
             self.config.google_api_key, size=self.config.street_view_size
         )
 
-        # EasyOCR reader — loaded once, reused across all calls
-        # gpu=False is safe default; set gpu=True if you have CUDA
-        logger.info("Loading EasyOCR model (first run downloads ~100MB)...")
-        self._ocr_reader = easyocr.Reader(["en"], gpu=False)
-        logger.info("Door Number Detector initialized")
+        # ── OCR engine selection ───────────────────────────────────────────────
+        self._ocr_engine = os.getenv("OCR_ENGINE", "easyocr").lower()
+
+        if self._ocr_engine == "paddleocr":
+            try:
+                from paddleocr import PaddleOCR
+                logger.info("Loading PaddleOCR model (first run downloads models)...")
+                self._paddle_reader = PaddleOCR(
+                    lang="en",
+                    use_angle_cls=True,
+                    use_gpu=False,
+                    show_log=False,
+                    det_db_thresh=0.2,
+                    det_db_box_thresh=0.4,
+                )
+                logger.info("PaddleOCR initialized")
+            except ImportError as exc:
+                raise ImportError(
+                    "PaddleOCR is not installed. Run: pip install paddleocr"
+                ) from exc
+        else:
+            import easyocr
+            # gpu=False is safe default; set gpu=True if you have CUDA
+            logger.info("Loading EasyOCR model (first run downloads ~100MB)...")
+            self._ocr_reader = easyocr.Reader(["en"], gpu=False)
+            logger.info("EasyOCR initialized")
+
+        logger.info(f"Door Number Detector initialized (OCR engine: {self._ocr_engine})")
 
     def _configure_tesseract(self):
         tesseract_path = self.config.tesseract_path
@@ -102,7 +130,7 @@ class DoorNumberDetector:
         for variant in [gray, gray_clahe]:
             mser = cv2.MSER_create()
             mser.setDelta(5)
-            mser.setMinArea(20)    # era 30 — apanha caracteres mais pequenos
+            mser.setMinArea(20)
             mser.setMaxArea(3000)
             regions, _ = mser.detectRegions(variant)
             if regions:
@@ -118,14 +146,12 @@ class DoorNumberDetector:
         if not char_boxes:
             return []
 
-        # Deduplicar boxes muito próximas (vêm dos dois variants)
         deduped: list[tuple[int, int, int, int]] = []
         for box in char_boxes:
             x, y, w, h = box
             if not any(abs(x - sx) < 5 and abs(y - sy) < 5 for sx, sy, *_ in deduped):
                 deduped.append(box)
 
-        # Agregar boxes próximas em regiões de "palavra"
         deduped.sort(key=lambda b: b[0])
         merged  = []
         current = list(deduped[0])
@@ -152,16 +178,13 @@ class DoorNumberDetector:
     def _extract_door_number(self, image: Image.Image) -> tuple[str | None, int]:
         """
         Pipeline:
-        1. Crop 20px em baixo (remove watermark Google)
-        2. EasyOCR na imagem completa 2x
-        3. EasyOCR em CLAHE 2x
-        4. EasyOCR em 3 crops de entrada
-        5. Tesseract fallback (PSMs 6/7/8/11)
-        6. Votação por soma de confiança
+        1. OCR na imagem completa 2x
+        2. OCR em CLAHE 2x
+        3. OCR em 3 crops de entrada
+        4. Tesseract fallback (PSMs 6/7/8/11)
+        5. Votação por soma de confiança
         """
-        # ── Crop watermark Google (20px em baixo) ─────────────────────────────
         w_orig, h_orig = image.size
-        image = image.crop((0, 0, w_orig, h_orig - 20))
 
         cv_img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         gray   = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
@@ -171,6 +194,13 @@ class DoorNumberDetector:
         clahe_obj = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 
         # ── Helpers ───────────────────────────────────────────────────────────
+        def _is_google_watermark(text: str, bbox: list[tuple[float, float]]) -> bool:
+            normalized = re.sub(r"[^a-z0-9]", "", text.lower())
+            if "google" not in normalized:
+                return False
+            y_max = max(int(p[1]) for p in bbox)
+            return y_max >= orig_h - 32
+
         def _run_easyocr(scan_img: np.ndarray, tag: str) -> list:
             results = self._ocr_reader.readtext(
                 scan_img,
@@ -183,11 +213,46 @@ class DoorNumberDetector:
                 canvas_size=2560,
                 mag_ratio=2.0,
             )
-            for _, text, conf in results:
+            filtered = []
+            for bbox, text, conf in results:
+                if _is_google_watermark(text, bbox):
+                    logger.info(f"Skipped Google watermark [{tag}] '{text}'")
+                    continue
                 for num in re.findall(r"\d{1,4}", text.strip()):
                     all_candidates.append((num, conf))
                     logger.info(f"EasyOCR [{tag}] '{num}' ← '{text}' ({conf * 100:.0f}%)")
-            return results
+                filtered.append((bbox, text, conf))
+            return filtered
+
+        def _run_paddleocr(scan_img: np.ndarray, tag: str) -> list:
+            ocr_result = self._paddle_reader.ocr(scan_img)
+            if not ocr_result:
+                return []
+
+            # PaddleOCR v2 returns a flat list of lines: [ [bbox, (text, score)], ... ]
+            # PaddleOCR v3 returns a list of pages where the first page is the image result.
+            if isinstance(ocr_result[0], list) and len(ocr_result[0]) >= 2 and isinstance(ocr_result[0][1], tuple):
+                page = ocr_result
+            else:
+                page = ocr_result[0]
+
+            if not page:
+                return []
+
+            normalized = []
+            for line in page:
+                bbox, (text, conf) = line
+                if _is_google_watermark(text, bbox):
+                    logger.info(f"Skipped Google watermark [{tag}] '{text}'")
+                    continue
+                for num in re.findall(r"\d{1,4}", text.strip()):
+                    all_candidates.append((num, conf))
+                    logger.info(f"PaddleOCR [{tag}] '{num}' ← '{text}' ({conf * 100:.0f}%)")
+                normalized.append((bbox, text, conf))
+            return normalized
+
+        # Dispatch to the right engine
+        _run_ocr = _run_paddleocr if self._ocr_engine == "paddleocr" else _run_easyocr
 
         def _annotate(canvas: np.ndarray, results: list, label: str = "") -> np.ndarray:
             for bbox, text, conf in results:
@@ -209,19 +274,19 @@ class DoorNumberDetector:
             return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()
 
         # ── Step 1: Imagem completa 2x ────────────────────────────────────────
-        logger.info("EasyOCR: full image 2x upscale...")
+        logger.info(f"OCR [{self._ocr_engine}]: full image 2x upscale...")
         full_2x  = self._upscale(cv_img, scale=2)
-        full_res = _run_easyocr(full_2x, "full_2x")
+        full_res = _run_ocr(full_2x, "full_2x")
         if self.config.debug:
             vis = _annotate(full_2x.copy(), full_res,
                             f"full_2x | {len(full_res)} detections")
             self._save_debug_image(vis, "scan_01_full_2x.png")
 
         # ── Step 2: CLAHE 2x ──────────────────────────────────────────────────
-        logger.info("EasyOCR: clahe...")
+        logger.info(f"OCR [{self._ocr_engine}]: clahe...")
         gray_clahe = clahe_obj.apply(gray)
         clahe_2x   = self._upscale(gray_clahe, scale=2)
-        clahe_res  = _run_easyocr(clahe_2x, "clahe")
+        clahe_res  = _run_ocr(clahe_2x, "clahe")
         if self.config.debug:
             vis = _annotate(_to_bgr(clahe_2x).copy(), clahe_res,
                             f"clahe | {len(clahe_res)} detections")
@@ -243,9 +308,9 @@ class DoorNumberDetector:
         #     crop_gray_clahe = clahe_obj.apply(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY))
         #     crop_clahe_up   = self._upscale(crop_gray_clahe, scale=3)
 
-        #     logger.info(f"EasyOCR: entrance crop '{crop_name}'...")
-        #     res_color = _run_easyocr(crop_up,       crop_name)
-        #     res_clahe = _run_easyocr(crop_clahe_up, f"{crop_name}_clahe")
+        #     logger.info(f"OCR: entrance crop '{crop_name}'...")
+        #     res_color = _run_ocr(crop_up,       crop_name)
+        #     res_clahe = _run_ocr(crop_clahe_up, f"{crop_name}_clahe")
 
         #     if self.config.debug:
         #         vis = _annotate(crop_up.copy(), res_color,
@@ -310,12 +375,12 @@ class DoorNumberDetector:
 
     # ── Everything below is UNCHANGED from your existing class ────────────────
 
-    def detect_door_number(self, latitude, longitude, heading=None, pitch=0, image=None):
+    def detect_door_number(self, latitude, longitude, heading=None, pitch=None, image=None):
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
 
         try:
-            heading_offsets = [0, -20, 20]
+            heading_offsets = [0, -20, 20, -40, 40, -60, 60]
             pitch_values    = [5, 10, 15] if pitch == None else [pitch]
 
             all_image_candidates: list[dict] = []
@@ -332,7 +397,7 @@ class DoorNumberDetector:
                     "pitch":      pitch,
                 })
             else:
-                for fov_try in [90, 60, 40]:
+                for fov_try in [90, 60, 40, 30, 20]:
                     fov_candidates = []
 
                     for pitch_try in pitch_values:
@@ -341,7 +406,7 @@ class DoorNumberDetector:
                             candidate_image = self.street_view.get_image(
                                 latitude,
                                 longitude,
-                                heading=heading,        # None → get_image auto-calcula
+                                heading=heading,
                                 heading_offset=offset,
                                 pitch=pitch_try,
                                 fov=fov_try,
@@ -366,7 +431,7 @@ class DoorNumberDetector:
                             fov_candidates.append({
                                 "number":     number,
                                 "confidence": confidence,
-                                "heading":    offset,   # offset relativo; heading absoluto calculado internamente
+                                "heading":    offset,
                                 "pitch":      pitch_try,
                                 "fov":        fov_try,
                             })

@@ -5,12 +5,14 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv310/
 venv/
 env/
 
 # Packaging / build artifacts
 build/
 dist/
+ocr_debug/
 *.egg-info/
 *.egg
 
@@ -25,5 +27,3 @@ Thumbs.db
 
 # Environment files
 .env
-
-ocr_debug/

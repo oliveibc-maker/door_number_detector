@@ -5,9 +5,9 @@ from core.detector import DoorNumberDetector
 
 def main():
     detector = DoorNumberDetector()
-    latitude, longitude = 41.256331, -8.645468  # 36 simple
+    #latitude, longitude = 41.256331, -8.645468  # 36 simple
     #latitude, longitude = 38.024463, -7.712959  # 17 
-    #latitude, longitude = 39.701068, -8.910996 #14 very difficult
+    latitude, longitude = 39.701068, -8.910996 #14 very difficult
 
     # Mostra a imagem padrão apenas para preview — não interfere com a deteção
     preview_image = detector.street_view.get_image(latitude, longitude)
