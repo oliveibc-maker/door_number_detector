@@ -3,5 +3,8 @@ pytesseract>=0.3.10
 Pillow>=10.0.0
 SQLAlchemy>=2.0.20
 python-dotenv>=1.0.0
-numpy>=1.26.0
-opencv-python>=4.9.0.74
+numpy>=1.26,<2.0
+opencv-python==4.6.0.66
+easyocr>=1.7.2
+paddlepaddle==2.6.2
+paddleocr==2.7.3
