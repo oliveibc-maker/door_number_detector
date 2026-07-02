@@ -61,5 +61,9 @@ class Config:
         return int(os.getenv("CONFIDENCE_THRESHOLD", "70"))
 
     @property
+    def road_offset_meters(self):
+        return float(os.getenv("ROAD_OFFSET_METERS", "10.0"))
+
+    @property
     def debug(self):
         return os.getenv("DEBUG", "False").lower() == "true"
