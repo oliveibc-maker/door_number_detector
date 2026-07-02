@@ -74,7 +74,13 @@ def main():
     detector = DoorNumberDetector()
     #latitude, longitude = 41.256331, -8.645468  # 36 simple
     #latitude, longitude = 38.024463, -7.712959  # 17 
-    latitude, longitude = 39.701068, -8.910996 #14 very difficult
+    #latitude, longitude = 39.701068, -8.910996 #14 very difficult
+    #latitude, longitude = 41.088368507582, -6.81537789305259 # 36
+    #latitude, longitude = 41.0893759030001, -6.81537262699993 #131
+    #latitude, longitude = 41.088695435, -6.81420591799997 #17/19?
+    latitude, longitude = 41.088503121, -6.81459559899997
+    #latitude, longitude = 41.0883351100001, -6.81493620399993
+
 
     preview_image = detector.street_view.get_image(latitude, longitude)
     if preview_image is not None:
