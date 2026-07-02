@@ -176,22 +176,10 @@ class DoorNumberDetector:
 
 
     def _extract_door_number(self, image: Image.Image) -> tuple[str | None, int]:
-        """
-        Pipeline:
-        1. OCR na imagem completa 2x
-        2. OCR em CLAHE 2x
-        3. OCR em 3 crops de entrada
-        4. Tesseract fallback (PSMs 6/7/8/11)
-        5. Votação por soma de confiança
-        """
-        w_orig, h_orig = image.size
-
         cv_img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        gray   = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
         orig_h, orig_w = cv_img.shape[:2]
 
         all_candidates: list[tuple[str, float]] = []
-        clahe_obj = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 
         # ── Helpers ───────────────────────────────────────────────────────────
         def _is_google_watermark(text: str, bbox: list[tuple[float, float]]) -> bool:
@@ -254,95 +242,9 @@ class DoorNumberDetector:
         # Dispatch to the right engine
         _run_ocr = _run_paddleocr if self._ocr_engine == "paddleocr" else _run_easyocr
 
-        def _annotate(canvas: np.ndarray, results: list, label: str = "") -> np.ndarray:
-            for bbox, text, conf in results:
-                has_num = bool(re.findall(r"\d{1,4}", text.strip()))
-                color   = (0, 200, 0) if has_num else (0, 0, 220)
-                pts     = np.array([[int(p[0]), int(p[1])] for p in bbox], np.int32)
-                cv2.polylines(canvas, [pts], True, color, 2)
-                x0 = int(min(p[0] for p in bbox))
-                y0 = int(min(p[1] for p in bbox))
-                cv2.putText(canvas, f"{text}({conf * 100:.0f}%)",
-                            (x0, max(y0 - 6, 12)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
-            if label:
-                cv2.putText(canvas, label, (8, canvas.shape[0] - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-            return canvas
-
-        def _to_bgr(img: np.ndarray) -> np.ndarray:
-            return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()
-
-        # ── Step 1: Imagem completa 2x ────────────────────────────────────────
         logger.info(f"OCR [{self._ocr_engine}]: full image 2x upscale...")
-        full_2x  = self._upscale(cv_img, scale=2)
-        full_res = _run_ocr(full_2x, "full_2x")
-        if self.config.debug:
-            vis = _annotate(full_2x.copy(), full_res,
-                            f"full_2x | {len(full_res)} detections")
-            self._save_debug_image(vis, "scan_01_full_2x.png")
-
-        # ── Step 2: CLAHE 2x ──────────────────────────────────────────────────
-        logger.info(f"OCR [{self._ocr_engine}]: clahe...")
-        gray_clahe = clahe_obj.apply(gray)
-        clahe_2x   = self._upscale(gray_clahe, scale=2)
-        clahe_res  = _run_ocr(clahe_2x, "clahe")
-        if self.config.debug:
-            vis = _annotate(_to_bgr(clahe_2x).copy(), clahe_res,
-                            f"clahe | {len(clahe_res)} detections")
-            self._save_debug_image(vis, "scan_02_clahe.png")
-
-        # ── Step 3: Crops de entrada ──────────────────────────────────────────
-        entrance_crops = {
-            "enter_lower_center": (orig_h // 3,        orig_h, orig_w // 4, 3 * orig_w // 4),
-            "enter_bottom_strip": (int(orig_h * 0.55), orig_h, 0,           orig_w),
-            "enter_center_col":   (0,                  orig_h, orig_w // 3, 2 * orig_w // 3),
-        }
-
-        # for crop_name, (y1, y2, x1, x2) in entrance_crops.items():
-        #     crop = cv_img[y1:y2, x1:x2]
-        #     if crop.size == 0:
-        #         continue
-
-        #     crop_up         = self._upscale(crop, scale=3)
-        #     crop_gray_clahe = clahe_obj.apply(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY))
-        #     crop_clahe_up   = self._upscale(crop_gray_clahe, scale=3)
-
-        #     logger.info(f"OCR: entrance crop '{crop_name}'...")
-        #     res_color = _run_ocr(crop_up,       crop_name)
-        #     res_clahe = _run_ocr(crop_clahe_up, f"{crop_name}_clahe")
-
-        #     if self.config.debug:
-        #         vis = _annotate(crop_up.copy(), res_color,
-        #                         f"{crop_name} | {len(res_color)} det.")
-        #         self._save_debug_image(vis, f"scan_03_{crop_name}.png")
-        #         vis2 = _annotate(_to_bgr(crop_clahe_up).copy(), res_clahe,
-        #                         f"{crop_name}_clahe | {len(res_clahe)} det.")
-        #         self._save_debug_image(vis2, f"scan_03_{crop_name}_clahe.png")
-
-        # # ── Step 4: Tesseract fallback ────────────────────────────────────────
-        # logger.info("Tesseract fallback (PSMs 6/7/8/11)...")
-        # for psm in [6, 7, 8, 11]:
-        #     try:
-        #         data = pytesseract.image_to_data(
-        #             image,
-        #             config=f"--oem 3 --psm {psm}",
-        #             lang=self.config.ocr_language,
-        #             output_type=pytesseract.Output.DICT,
-        #         )
-        #         for word, conf in zip(data["text"], data["conf"]):
-        #             word = str(word).strip()
-        #             try:
-        #                 conf_int = int(float(conf))
-        #             except (ValueError, TypeError):
-        #                 continue
-        #             if conf_int < 0:
-        #                 continue
-        #             for num in re.findall(r"\d{1,4}", word):
-        #                 all_candidates.append((num, conf_int / 100.0))
-        #                 logger.info(f"Tesseract psm={psm} '{num}' ({conf_int}%)")
-        #     except Exception as exc:
-        #         logger.warning(f"Tesseract psm={psm} failed: {exc}")
+        full_2x = self._upscale(cv_img, scale=2)
+        _run_ocr(full_2x, "full_2x")
 
         if not all_candidates:
             logger.info("No candidates found")
@@ -371,17 +273,13 @@ class DoorNumberDetector:
         )
         return best_number, best_confidence_pct
 
-
-
-    # ── Everything below is UNCHANGED from your existing class ────────────────
-
     def detect_door_number(self, latitude, longitude, heading=None, pitch=None, image=None):
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
 
         try:
-            heading_offsets = [0, -20, 20, -40, 40, -60, 60]
-            pitch_values    = [5, 10, 15] if pitch == None else [pitch]
+            heading_offsets = [0, -20, 20, -40, 40, -50, 50]
+            pitch_values    = [0, 5, 10, 15] if pitch == None else [pitch]
 
             all_image_candidates: list[dict] = []
 
