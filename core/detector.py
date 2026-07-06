@@ -58,6 +58,7 @@ class DoorNumberDetector:
         self.debug_root.mkdir(parents=True, exist_ok=True)
         self.debug_dir = self.debug_root / ts
         self.debug_dir.mkdir(parents=True, exist_ok=True)
+        self.current_debug_house_dir: Path | None = None  # set per detect_door_number call
         self.db = DatabaseManager(self.config)
         self.street_view = StreetViewFetcher(
             self.config.google_api_key, size=self.config.street_view_size
@@ -103,8 +104,9 @@ class DoorNumberDetector:
         else:
             logger.info(f"Using Tesseract executable: {tesseract_path}")
 
-    def _save_debug_image(self, image, name):
-        path = self.debug_dir / name
+    def _save_debug_image(self, image, name, directory: Path | None = None):
+        target_dir = directory if directory is not None else self.debug_dir
+        path = target_dir / name
         if isinstance(image, np.ndarray):
             cv2.imwrite(str(path), image)
         else:
@@ -361,6 +363,10 @@ class DoorNumberDetector:
                 # if _apply_watermark_filters(bbox, text, tag, watermark_bboxes):
                 #     continue
                 for num in re.findall(r"\d{1,4}", text.strip()):
+                    # Door numbers never start with 0 (e.g. "050" is a cropped "5050")
+                    if len(num) > 1 and num.startswith("0"):
+                        logger.info(f"OCR: skipped leading-zero fragment '{num}'")
+                        continue
                     all_candidates.append((num, conf))
                     logger.info(f"PaddleOCR [{tag}] '{num}' ← '{text}' ({conf * 100:.0f}%)")
                 normalized_results.append((bbox, text, conf))
@@ -386,7 +392,8 @@ class DoorNumberDetector:
             conf_sum[num] = conf_sum.get(num, 0.0) + conf
 
         def score(num: str) -> tuple:
-            return (conf_sum[num], len(num), best_conf[num])
+            vote_count = sum(1 for n, _ in all_candidates if n == num)
+            return (best_conf[num], vote_count, conf_sum[num])
 
         best_number         = max(best_conf.keys(), key=score)
         best_confidence_pct = int(best_conf[best_number] * 100)
@@ -427,8 +434,15 @@ class DoorNumberDetector:
     # before we trust it and skip narrower FOV levels.
     # Rationale: a 2-digit read like "13" can be a cropped "131"; a 3-digit read
     # is far less likely to be a truncated longer number.
-    _EARLY_EXIT_MIN_DIGITS: int = 3
+    _EARLY_EXIT_MIN_DIGITS: int = 4
     _EARLY_EXIT_MIN_AGREE:  int = 3
+
+    def _is_suspicious_number(self, num: str) -> bool:
+        """Numbers that need corroboration before early exit:
+        - Short (< 3 digits) — could be a cropped longer number
+        - Year-like (19xx/20xx) — likely Google watermark
+        """
+        return len(num) < self._EARLY_EXIT_MIN_DIGITS or bool(re.fullmatch(r"(19|20)\d{2}", num))
 
     def _has_confident_result(self, candidates: list[dict]) -> bool:
         if not candidates:
@@ -444,7 +458,7 @@ class DoorNumberDetector:
 
         # Long numbers are trusted on a single high-confidence shot — a 3-digit
         # read is unlikely to be a cropped fragment of a longer number.
-        if len(best_number) >= self._EARLY_EXIT_MIN_DIGITS:
+        if not self._is_suspicious_number(best_number):
             return True
 
         # Short numbers (1-2 digits) must appear in at least N confident shots
@@ -457,6 +471,15 @@ class DoorNumberDetector:
             and c["confidence"] >= self.config.confidence_threshold
         )
         return agreeing >= self._EARLY_EXIT_MIN_AGREE
+        
+    def _has_any_confident_candidate(self, candidates: list[dict]) -> bool:
+        """True if at least one candidate clears the confidence threshold.
+        Used to gate pass 2/3 — only move to a different position when centre
+        produced *nothing* plausible, not merely when the best read is short."""
+        return any(
+            c["number"] and c["confidence"] >= self.config.confidence_threshold
+            for c in candidates
+    )
 
     # ── Per-position iteration ─────────────────────────────────────────────────
     def _fetch_candidates(
@@ -504,10 +527,10 @@ class DoorNumberDetector:
                         continue
 
                     if self.config.debug:
-                        debug_name = (
-                            f"{pass_label}_fov{fov_try}_offset{offset}_pitch{pitch_try}.png"
-                        )
-                        self._save_debug_image(candidate_image, debug_name)
+                        pass_dir = (self.current_debug_house_dir or self.debug_dir) / pass_label
+                        pass_dir.mkdir(parents=True, exist_ok=True)
+                        debug_name = f"fov{fov_try}_offset{offset}_pitch{pitch_try}.png"
+                        self._save_debug_image(candidate_image, debug_name, directory=pass_dir)
 
                     number, confidence = self._extract_door_number(candidate_image)
                     logger.info(
@@ -540,6 +563,12 @@ class DoorNumberDetector:
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
 
         try:
+            # ── Per-house debug directory ──────────────────────────────────────────
+            if self.config.debug:
+                house_name = f"{latitude:.6f}_{longitude:.6f}"
+                self.current_debug_house_dir = self.debug_dir / house_name
+                self.current_debug_house_dir.mkdir(parents=True, exist_ok=True)
+
             all_image_candidates: list[dict] = []
 
             if image is not None:
@@ -576,7 +605,7 @@ class DoorNumberDetector:
                 )
 
                 # ── Pass 2: shift right along the road ────────────────────────
-                if not self._has_confident_result(all_image_candidates):
+                if not self._has_any_confident_candidate(all_image_candidates):
                     r_lat, r_lng = self._road_offset(latitude, longitude, _base_heading, +offset_m)
                     logger.info(
                         f"Pass 2/3: no confident result — shifting {offset_m}m RIGHT "
@@ -589,7 +618,7 @@ class DoorNumberDetector:
                     ))
 
                 # ── Pass 3: shift left along the road ─────────────────────────
-                if not self._has_confident_result(all_image_candidates):
+                if not self._has_any_confident_candidate(all_image_candidates):
                     l_lat, l_lng = self._road_offset(latitude, longitude, _base_heading, -offset_m)
                     logger.info(
                         f"Pass 3/3: no confident result — shifting {offset_m}m LEFT "
@@ -612,9 +641,18 @@ class DoorNumberDetector:
                     "error":       "Image unavailable",
                 }
 
+            confident_votes = Counter(
+                c["number"] for c in all_image_candidates
+                if c["number"] and c["confidence"] >= self.config.confidence_threshold
+            )
+
             best_candidate = max(
                 all_image_candidates,
-                key=lambda c: (c["confidence"], len(c["number"]) if c["number"] else 0),
+                key=lambda c: (
+                    c["confidence"],
+                    confident_votes.get(c["number"], 0),
+                    len(c["number"]) if c["number"] else 0,
+                ),
             )
 
             door_number = best_candidate["number"]
