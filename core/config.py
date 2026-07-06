@@ -62,7 +62,7 @@ class Config:
 
     @property
     def road_offset_meters(self):
-        return float(os.getenv("ROAD_OFFSET_METERS", "10.0"))
+        return float(os.getenv("ROAD_OFFSET_METERS", "5.0"))
 
     @property
     def debug(self):
