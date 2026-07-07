@@ -59,7 +59,7 @@ class DoorNumberDetector:
         self.debug_root.mkdir(parents=True, exist_ok=True)
         self.debug_dir = self.debug_root / ts
         self.debug_dir.mkdir(parents=True, exist_ok=True)
-        self.current_debug_house_dir: Path | None = None  # set per detect_door_number call
+        self.current_debug_house_dir: Path | None = None
         self.db = DatabaseManager(self.config)
         self.street_view = StreetViewFetcher(
             self.config.google_api_key, size=self.config.street_view_size
@@ -119,162 +119,6 @@ class DoorNumberDetector:
         h, w = image.shape[:2]
         return cv2.resize(image, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
 
-    # # ── ZONE FINDER: MSER — finds character-like blobs without any model ───────
-    # def _find_zones_mser(self, gray: np.ndarray) -> list[tuple[int, int, int, int]]:
-    #     clahe      = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    #     gray_clahe = clahe.apply(gray)
-
-    #     all_raw_boxes: list[tuple[int, int, int, int]] = []
-
-    #     for variant in [gray, gray_clahe]:
-    #         mser = cv2.MSER_create()
-    #         mser.setDelta(5)
-    #         mser.setMinArea(20)
-    #         mser.setMaxArea(3000)
-    #         regions, _ = mser.detectRegions(variant)
-    #         if regions:
-    #             all_raw_boxes += [
-    #                 cv2.boundingRect(r.reshape(-1, 1, 2)) for r in regions
-    #             ]
-
-    #     char_boxes = [
-    #         (x, y, w, h) for x, y, w, h in all_raw_boxes
-    #         if h > 0 and 0.1 < (w / h) < 3.0 and h > 8
-    #     ]
-
-    #     if not char_boxes:
-    #         return []
-
-    #     deduped: list[tuple[int, int, int, int]] = []
-    #     for box in char_boxes:
-    #         x, y, w, h = box
-    #         if not any(abs(x - sx) < 5 and abs(y - sy) < 5 for sx, sy, *_ in deduped):
-    #             deduped.append(box)
-
-    #     deduped.sort(key=lambda b: b[0])
-    #     merged  = []
-    #     current = list(deduped[0])
-
-    #     for x, y, w, h in deduped[1:]:
-    #         gap      = x - (current[0] + current[2])
-    #         same_row = abs(y - current[1]) < current[3] * 0.8
-    #         if gap < current[3] * 1.5 and same_row:
-    #             x2 = max(current[0] + current[2], x + w)
-    #             y1 = min(current[1], y)
-    #             y2 = max(current[1] + current[3], y + h)
-    #             current = [current[0], y1, x2 - current[0], y2 - y1]
-    #         else:
-    #             merged.append(tuple(current))
-    #             current = [x, y, w, h]
-
-    #     merged.append(tuple(current))
-    #     word_boxes = [(x, y, w, h) for x, y, w, h in merged if w > 15]
-
-    #     logger.info(f"MSER found {len(word_boxes)} candidate zone(s)")
-    #     return word_boxes
-
-    # ── Watermark helpers ──────────────────────────────────────────────────────
-    # @staticmethod
-    # def _bbox_center(bbox: list) -> tuple[float, float]:
-    #     xs = [p[0] for p in bbox]
-    #     ys = [p[1] for p in bbox]
-    #     return sum(xs) / len(xs), sum(ys) / len(ys)
-
-    # @staticmethod
-    # def _is_watermark_text(text: str) -> bool:
-    #     normalized = re.sub(r"[^a-z0-9]", "", text.lower())
-    #     # Layer 1 — exact / near-exact
-    #     if "google" in normalized or "©" in text:
-    #         return True
-    #     # Layer 2 — garbled Google: 'go' + 1-5 mixed chars ending in 'e' or '3'
-    #     if re.search(r"go[0-9a-z]{1,5}[e3]", normalized):
-    #         return True
-    #     # Layer 3 — year-like run of 4+ digits ending in a vowel
-    #     if re.search(r"\d{4,}[aeio]$", normalized):
-    #         return True
-    #     # Layer 4 — digits, then a vowel, then more digits/letters (mid-garble)
-    #     if re.search(r"\d{3,}[aeio]\d+", normalized):
-    #         return True
-    #     # Layer 5 — 5+ digit string starting with 19xx/20xx, ≤1 alpha char
-    #     digits_only = re.sub(r"[^0-9]", "", text)
-    #     alpha_count = sum(1 for c in normalized if c.isalpha())
-    #     if (len(digits_only) >= 5
-    #             and re.match(r"(19|20)\d{2}", digits_only)
-    #             and alpha_count <= 1):
-    #         return True
-    #     # Layer 6 — copyright year prefix followed by 'g' (partial Google read)
-    #     if re.search(r"^(19|20)\d{0,2}g", normalized):
-    #         return True
-    #     # Layer 7 — decimal-format number: not a valid house number
-    #     if re.match(r"^\d+\.\d+$", text.strip()):
-    #         return True
-    #     return False
-
-    # def _near_any_watermark(
-    #     self, bbox: list, watermark_bboxes: list, margin: int = 350
-    # ) -> bool:
-    #     if not watermark_bboxes:
-    #         return False
-    #     cx, cy = self._bbox_center(bbox)
-    #     for wb in watermark_bboxes:
-    #         wcx, wcy = self._bbox_center(wb)
-    #         if abs(cx - wcx) < margin and abs(cy - wcy) < margin:
-    #             return True
-    #     return False
-
-    # def _detect_watermark_regions(self, scan_img: np.ndarray) -> list:
-    #     gray = cv2.cvtColor(scan_img, cv2.COLOR_BGR2GRAY)
-    #     clahe_strong   = cv2.createCLAHE(clipLimit=6.0, tileGridSize=(4, 4))
-    #     clahe_moderate = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    #     watermark_bboxes = []
-    #     seen_centers: list[tuple[float, float]] = []
-    #     def _add_anchor(bbox, text, source):
-    #         cx, cy = self._bbox_center(bbox)
-    #         if any(abs(cx - sx) < 100 and abs(cy - sy) < 100 for sx, sy in seen_centers):
-    #             return
-    #         seen_centers.append((cx, cy))
-    #         watermark_bboxes.append(bbox)
-    #         logger.info(f"Watermark pre-scan [{source}] found anchor: '{text}'")
-    #     for variant_name, gray_variant in [
-    #         ("clahe_strong",   clahe_strong.apply(gray)),
-    #         ("clahe_moderate", clahe_moderate.apply(gray)),
-    #     ]:
-    #         enhanced = cv2.cvtColor(gray_variant, cv2.COLOR_GRAY2BGR)
-    #         try:
-    #             if self._ocr_engine == "paddleocr":
-    #                 result = self._paddle_reader.ocr(enhanced)
-    #                 if not result:
-    #                     continue
-    #                 page = (
-    #                     result
-    #                     if isinstance(result[0], list)
-    #                     and len(result[0]) >= 2
-    #                     and isinstance(result[0][1], tuple)
-    #                     else result[0]
-    #                 )
-    #                 if page:
-    #                     for bbox, (text, _) in page:
-    #                         if self._is_watermark_text(text):
-    #                             _add_anchor(bbox, text, variant_name)
-    #             else:
-    #                 results = self._ocr_reader.readtext(
-    #                     enhanced,
-    #                     paragraph=False,
-    #                     detail=1,
-    #                     min_size=3,
-    #                     text_threshold=0.05,
-    #                     low_text=0.05,
-    #                     link_threshold=0.2,
-    #                     canvas_size=2560,
-    #                 )
-    #                 for bbox, text, _ in results:
-    #                     if self._is_watermark_text(text):
-    #                         _add_anchor(bbox, text, variant_name)
-    #         except Exception as exc:
-    #             logger.warning(f"Watermark pre-scan [{variant_name}] failed: {exc}")
-    #     logger.info(f"Watermark pre-scan: {len(watermark_bboxes)} anchor(s) found")
-    #     return watermark_bboxes
-
     def _extract_door_number(self, image: Image.Image) -> tuple[str | None, int]:
         cv_img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         orig_h, orig_w = cv_img.shape[:2]
@@ -283,26 +127,6 @@ class DoorNumberDetector:
 
         logger.info(f"OCR [{self._ocr_engine}]: full image 2x upscale...")
         full_2x = self._upscale(cv_img, scale=2)
-
-        # # Pre-scan: find ALL watermark anchors before main pass
-        # pre_watermark_bboxes = self._detect_watermark_regions(full_2x)
-
-        # ── Helpers ───────────────────────────────────────────────────────────
-        # def _is_google_watermark(text: str, bbox: list) -> bool:
-        #     normalized = re.sub(r"[^a-z0-9]", "", text.lower())
-        #     if "google" not in normalized:
-        #         return False
-        #     y_max = max(int(p[1]) for p in bbox)
-        #     return y_max >= orig_h - 32
-
-        # def _apply_watermark_filters(bbox, text, tag, watermark_bboxes):
-        #     if _is_google_watermark(text, bbox):
-        #         logger.info(f"Skipped Google watermark [{tag}] '{text}'")
-        #         return True
-        #     if self._near_any_watermark(bbox, watermark_bboxes):
-        #         logger.info(f"Skipped detection near watermark [{tag}] '{text}'")
-        #         return True
-        #     return False
 
         def _run_easyocr(scan_img: np.ndarray, tag: str) -> list:
             results = self._ocr_reader.readtext(
@@ -316,25 +140,14 @@ class DoorNumberDetector:
                 canvas_size=2560,
                 mag_ratio=2.0,
             )
-
-            # # Seed with pre-scan anchors + any watermark text found in this pass
-            # watermark_bboxes = list(pre_watermark_bboxes)
-            # watermark_bboxes += [
-            #     bbox for bbox, text, _ in results
-            #     if self._is_watermark_text(text)
-            # ]
-
             filtered = []
             for bbox, text, conf in results:
-                # if _apply_watermark_filters(bbox, text, tag, watermark_bboxes):
-                #     continue
                 for num in re.findall(r"\d{1,4}", text.strip()):
-                    # Door numbers never start with 0 (e.g. "050" is a cropped "5050")
                     if len(num) > 1 and num.startswith("0"):
                         logger.info(f"OCR: skipped leading-zero fragment '{num}'")
                         continue
                     all_candidates.append((num, conf))
-                    logger.info(f"EasyOCR [{tag}] '{num}' ← '{text}' ({conf * 100:.0f}%)")
+                    logger.info(f"EasyOCR [{tag}] '{num}' <- '{text}' ({conf * 100:.0f}%)")
                 filtered.append((bbox, text, conf))
             return filtered
 
@@ -342,38 +155,24 @@ class DoorNumberDetector:
             ocr_result = self._paddle_reader.ocr(scan_img)
             if not ocr_result:
                 return []
-
             if isinstance(ocr_result[0], list) and len(ocr_result[0]) >= 2 and isinstance(ocr_result[0][1], tuple):
                 page = ocr_result
             else:
                 page = ocr_result[0]
-
             if not page:
                 return []
-
-            # # Seed with pre-scan anchors + any watermark text found in this pass
-            # watermark_bboxes = list(pre_watermark_bboxes)
-            # watermark_bboxes += [
-            #     bbox for bbox, (text, _) in page
-            #     if self._is_watermark_text(text)
-            # ]
-
             normalized_results = []
             for line in page:
                 bbox, (text, conf) = line
-                # if _apply_watermark_filters(bbox, text, tag, watermark_bboxes):
-                #     continue
                 for num in re.findall(r"\d{1,4}", text.strip()):
-                    # Door numbers never start with 0 (e.g. "050" is a cropped "5050")
                     if len(num) > 1 and num.startswith("0"):
                         logger.info(f"OCR: skipped leading-zero fragment '{num}'")
                         continue
                     all_candidates.append((num, conf))
-                    logger.info(f"PaddleOCR [{tag}] '{num}' ← '{text}' ({conf * 100:.0f}%)")
+                    logger.info(f"PaddleOCR [{tag}] '{num}' <- '{text}' ({conf * 100:.0f}%)")
                 normalized_results.append((bbox, text, conf))
             return normalized_results
 
-        # ── Run main OCR pass ─────────────────────────────────────────────────
         if self._ocr_engine == "paddleocr":
             _run_paddleocr(full_2x, "full_2x")
         else:
@@ -383,7 +182,6 @@ class DoorNumberDetector:
             logger.info("No candidates found")
             return None, 0
 
-        # ── Scoring por soma de confiança ─────────────────────────────────────
         best_conf: dict[str, float] = {}
         conf_sum:  dict[str, float] = {}
 
@@ -418,32 +216,17 @@ class DoorNumberDetector:
         return lat + dlat, lng + dlng
 
     # ── FOV sweep configuration ────────────────────────────────────────────────
-    # Wide FOV captures more scene per shot → fewer steps needed.
-    # Narrow FOV sees a small slice → dense heading & pitch grid required.
     _FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
-        #  fov   heading_offsets                                      pitch_values
-        (  60,   [0, -20, 20],                                       [-10, 0, 10]                     ),
-        (  40,   [0, -15, 15, -30, 30],                              [-10, -5, 0, 5, 10]              ),
-        (  30,   [0, -10, 10, -20, 20, -30, 30],                     [-10, -5, 0, 5, 10, 15]          ),
-        (  20,   [0, -5, 5, -10, 10, -20, 20, -30, 30],              [-15, -10, -5, 0, 5, 10, 15]     ),
-        (  10,   [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25],    [-15, -10, -5, 0, 5, 10, 15, 20] ),
+        #  fov   heading_offsets                                      pitch_values (center-first)
+        # (  40,   [0, -15, 15, -30, 30],                             [0, -5, 5, -10, 10]          ),  # removed
+        # (  30,   [0, -10, 10, -20, 20, -30, 30],                    [0, -5, 5, -10, 10]          ),  # removed
+        (  20,   [0, -5, 5, -10, 10, -20, 20, -30, 30],              [0, -5, 5, -10, 10]          ),
+        (  10,   [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25],    [0, -5, 5, -10, 10]          ),
     ]
 
-
     # ── Early-exit thresholds ──────────────────────────────────────────────────
-    # A number this short (digits) requires _EARLY_EXIT_MIN_AGREE agreeing shots
-    # before we trust it and skip narrower FOV levels.
-    # Rationale: a 2-digit read like "13" can be a cropped "131"; a 3-digit read
-    # is far less likely to be a truncated longer number.
     _EARLY_EXIT_MIN_DIGITS: int = 4
     _EARLY_EXIT_MIN_AGREE:  int = 3
-
-    # def _is_suspicious_number(self, num: str) -> bool:
-    #     """Numbers that need corroboration before early exit:
-    #     - Short (< 3 digits) — could be a cropped longer number
-    #     - Year-like (19xx/20xx) — likely Google watermark
-    #     """
-    #     return len(num) < self._EARLY_EXIT_MIN_DIGITS or bool(re.fullmatch(r"(19|20)\d{2}", num))
 
     def _is_suspicious_number(self, num: str) -> bool:
         """All numbers need corroboration — no length-based free pass."""
@@ -461,30 +244,22 @@ class DoorNumberDetector:
 
         best_number = best["number"]
 
-        # Long numbers are trusted on a single high-confidence shot — a 3-digit
-        # read is unlikely to be a cropped fragment of a longer number.
         if not self._is_suspicious_number(best_number):
             return True
 
-        # Short numbers (1-2 digits) must appear in at least N confident shots
-        # before we early-exit.  One edge-cropped frame returning "13" at 99%
-        # is not enough — we need corroboration, or we keep zooming in (FOV→10)
-        # where the extra pixels often reveal the missing trailing digit(s).
         agreeing = sum(
             1 for c in candidates
             if c["number"] == best_number
             and c["confidence"] >= self.config.confidence_threshold
         )
         return agreeing >= self._EARLY_EXIT_MIN_AGREE
-        
+
     def _has_any_confident_candidate(self, candidates: list[dict]) -> bool:
-        """True if at least one candidate clears the confidence threshold.
-        Used to gate pass 2/3 — only move to a different position when centre
-        produced *nothing* plausible, not merely when the best read is short."""
+        """True if at least one candidate clears the confidence threshold."""
         return any(
             c["number"] and c["confidence"] >= self.config.confidence_threshold
             for c in candidates
-    )
+        )
 
     # ── Per-position iteration ─────────────────────────────────────────────────
     def _fetch_candidates(
@@ -497,21 +272,22 @@ class DoorNumberDetector:
     ) -> list[dict]:
         """Run all FOV/heading/pitch iterations for a given position.
 
-        heading_offsets and pitch_values are driven by the per-FOV sweep table so
-        that wide FOVs use a coarse grid (cheap) and narrow FOVs use a dense grid
-        (thorough).  When the caller supplies a specific pitch (pitch_override),
-        only that pitch is used at every FOV level.
-
-        Exits early as soon as a confident result is found, avoiding unnecessary
-        API calls at smaller FOV levels.
+        Exits early as soon as a confident result is found — both between FOV
+        levels AND after every single image (inner early-exit).
         """
         all_image_candidates: list[dict] = []
+        done = False
 
         for fov_try, fov_heading_offsets, fov_pitch_values in self._FOV_SWEEP:
+            if done:
+                break
+
             pitch_values = [pitch_override] if pitch_override is not None else fov_pitch_values
-            fov_candidates: list[dict] = []
 
             for pitch_try in pitch_values:
+                if done:
+                    break
+
                 for offset in fov_heading_offsets:
                     logger.info(
                         f"[{pass_label}] Trying FOV={fov_try} offset={offset} pitch={pitch_try}"
@@ -543,7 +319,7 @@ class DoorNumberDetector:
                         f"'{number}' (confidence: {confidence}%)"
                     )
 
-                    fov_candidates.append({
+                    all_image_candidates.append({
                         "number":     number,
                         "confidence": confidence,
                         "heading":    offset,
@@ -551,24 +327,23 @@ class DoorNumberDetector:
                         "fov":        fov_try,
                     })
 
-            all_image_candidates.extend(fov_candidates)
-
-            # ── Early exit ────────────────────────────────────────────────────
-            if self._has_confident_result(all_image_candidates):
-                logger.info(
-                    f"[{pass_label}] Confident result at FOV={fov_try} — skipping narrower levels."
-                )
-                break
+                    # Inner early-exit: check after every single image, not just
+                    # between FOV levels — avoids unnecessary API calls.
+                    if self._has_confident_result(all_image_candidates):
+                        logger.info(
+                            f"[{pass_label}] Confident result at FOV={fov_try} "
+                            f"offset={offset} pitch={pitch_try} — stopping sweep."
+                        )
+                        done = True
+                        break
 
         return all_image_candidates
-
 
     def detect_door_number(self, latitude, longitude, heading=None, pitch=None, image=None):
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
 
         try:
-            # ── Per-house debug directory ──────────────────────────────────────────
             if self.config.debug:
                 house_name = f"{latitude:.6f}_{longitude:.6f}"
                 self.current_debug_house_dir = self.debug_dir / house_name
@@ -588,52 +363,98 @@ class DoorNumberDetector:
                 })
             else:
                 _base_heading = heading
+                road_heading: float | None = None
+
                 if _base_heading is None:
                     try:
-                        cam_lat, cam_lng = self.street_view.get_pano_location(latitude, longitude)
+                        # get_pano_location returns (cam_lat, cam_lng, road_heading).
+                        # road_heading is the GSV car travel direction (road direction).
+                        # It may be None if the API does not return it for this pano.
+                        cam_lat, cam_lng, road_heading = self.street_view.get_pano_location(
+                            latitude, longitude
+                        )
                         _base_heading = StreetViewFetcher.calculate_heading(
                             cam_lat, cam_lng, latitude, longitude
                         )
-                        logger.info(f"Pre-computed heading for road offset: {_base_heading:.1f}°")
+                        logger.info(
+                            f"Heading pano->target: {_base_heading:.1f}° "
+                            f"(road_heading from API: {road_heading})"
+                        )
                     except Exception as exc:
-                        logger.warning(f"Could not compute heading for road offset: {exc}. Using 0°.")
+                        logger.warning(f"Could not compute heading: {exc}. Using 0°.")
                         _base_heading = 0
 
-                offset_m = self.config.road_offset_meters
-
-                # ── Pass 1: original position ──────────────────────────────────
-                logger.info("Pass 1/3: original position")
+                # ── Pass 1: direct pano→target heading ────────────────────────
+                # Correct for building coordinates (pano far from road → vector
+                # points at the building facade).
+                # For road-snapped coordinates both the pano and the target sit on
+                # the road so this vector points along the road — in that case
+                # pass 1 finds nothing and the result is returned as not found.
+                logger.info(f"Pass 1: direct heading {_base_heading:.1f}°")
                 all_image_candidates = self._fetch_candidates(
-                    latitude, longitude, heading,
-                    pass_label="center",
+                    latitude, longitude, _base_heading,
+                    pass_label="direct",
                     pitch_override=pitch,
                 )
 
-                # ── Pass 2: shift right along the road ────────────────────────
-                if not self._has_any_confident_candidate(all_image_candidates):
-                    r_lat, r_lng = self._road_offset(latitude, longitude, _base_heading, +offset_m)
-                    logger.info(
-                        f"Pass 2/3: no confident result — shifting {offset_m}m RIGHT "
-                        f"to ({r_lat:.6f}, {r_lng:.6f})"
-                    )
-                    all_image_candidates.extend(self._fetch_candidates(
-                        r_lat, r_lng, heading,
-                        pass_label="right",
-                        pitch_override=pitch,
-                    ))
+                # ── Road offset fallback (disabled) ───────────────────────────
+                # If pass 1 finds nothing, shift the viewpoint along the road
+                # and retry. Useful when the pano is not directly in front of
+                # the building. To enable, set offset_m in config and uncomment.
+                #
+                
+                # if not self._has_any_confident_candidate(all_image_candidates):
+                #     offset_m = self.config.road_offset_meters
+                #     r_lat, r_lng = self._road_offset(latitude, longitude, _base_heading, +offset_m)
+                #     logger.info(
+                #         f"Pass 2: no confident result — shifting {offset_m}m RIGHT "
+                #         f"to ({r_lat:.6f}, {r_lng:.6f})"
+                #     )
+                #     all_image_candidates.extend(self._fetch_candidates(
+                #         r_lat, r_lng, _base_heading,
+                #         pass_label="right",
+                #         pitch_override=pitch,
+                #     ))
+                
+                # if not self._has_any_confident_candidate(all_image_candidates):
+                #     l_lat, l_lng = self._road_offset(latitude, longitude, _base_heading, -offset_m)
+                #     logger.info(
+                #         f"Pass 3: no confident result — shifting {offset_m}m LEFT "
+                #         f"to ({l_lat:.6f}, {l_lng:.6f})"
+                #     )
+                #     all_image_candidates.extend(self._fetch_candidates(
+                #         l_lat, l_lng, _base_heading,
+                #         pass_label="left",
+                #         pitch_override=pitch,
+                #     ))
 
-                # ── Pass 3: shift left along the road ─────────────────────────
-                if not self._has_any_confident_candidate(all_image_candidates):
-                    l_lat, l_lng = self._road_offset(latitude, longitude, _base_heading, -offset_m)
-                    logger.info(
-                        f"Pass 3/3: no confident result — shifting {offset_m}m LEFT "
-                        f"to ({l_lat:.6f}, {l_lng:.6f})"
-                    )
-                    all_image_candidates.extend(self._fetch_candidates(
-                        l_lat, l_lng, heading,
-                        pass_label="left",
-                        pitch_override=pitch,
-                    ))
+                # ── Perpendicular fallback (disabled) ──────────────────────────
+                # When pass 1 finds nothing (road-snapped coordinate) it is
+                # preferable to return no result rather than risk reading the
+                # wrong building on the other side of the road.
+                # To re-enable, uncomment the block below. It uses road_heading
+                # from the GSV metadata to pick the correct perpendicular side
+                # deterministically (no guessing when road_heading is available).
+                #
+                # if not self._has_any_confident_candidate(all_image_candidates):
+                #     if road_heading is not None:
+                #         angle_diff = (_base_heading - road_heading + 540) % 360 - 180
+                #         perp = (road_heading + 90) % 360 if angle_diff >= 0 else (road_heading - 90) % 360
+                #         side = "right" if angle_diff >= 0 else "left"
+                #         logger.info(
+                #             f"Perp fallback: road_heading={road_heading:.1f}°, "
+                #             f"using {perp:.1f}° ({side} side of road)"
+                #         )
+                #         all_image_candidates.extend(self._fetch_candidates(
+                #             latitude, longitude, perp,
+                #             pass_label="perp",
+                #             pitch_override=pitch,
+                #         ))
+                #     else:
+                #         logger.warning(
+                #             "Pass 1 found nothing and road_heading unavailable — "
+                #             "skipping perpendicular fallback to avoid false positives."
+                #         )
 
             if not all_image_candidates:
                 logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
@@ -646,17 +467,6 @@ class DoorNumberDetector:
                     "error":       "Image unavailable",
                 }
 
-            # Numbers visible across a wide heading range are likely large signs, not door plates
-            # offsets_by_number: dict[str, list[int]] = defaultdict(list)
-            # for c in all_image_candidates:
-            #     if c["number"] and c["confidence"] >= self.config.confidence_threshold:
-            #         offsets_by_number[c["number"]].append(c["heading"])
-
-            # heading_spread = {
-            #     num: max(offsets) - min(offsets)
-            #     for num, offsets in offsets_by_number.items()
-            # }
-
             confident_votes = Counter(
                 c["number"] for c in all_image_candidates
                 if c["number"] and c["confidence"] >= self.config.confidence_threshold
@@ -667,7 +477,6 @@ class DoorNumberDetector:
                 key=lambda c: (
                     c["confidence"],
                     confident_votes.get(c["number"], 0),
-                    # -heading_spread.get(c["number"], 0),  # narrower spread = better
                     len(c["number"]) if c["number"] else 0,
                 ),
             )
@@ -725,8 +534,8 @@ class DoorNumberDetector:
             result = self.detect_door_number(
                 coordinate["latitude"],
                 coordinate["longitude"],
-                coordinate.get("heading", 0),
-                coordinate.get("pitch", 0),
+                coordinate.get("heading"),  # None → auto-compute fires correctly
+                coordinate.get("pitch"),    # None → full pitch sweep used
             )
             results.append(result)
         return results

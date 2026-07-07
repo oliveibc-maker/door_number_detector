@@ -152,7 +152,7 @@ def main():
     # Rows already present (matched by lat/lng) will be skipped.
     # Results for missing rows will be written to output_csv (a new file).
     existing_csv = None
-    # existing_csv = project_root / f"Portas_Teste2_predictions_20260706_104605 copy.csv"
+    # existing_csv = project_root / f"Portas_Teste2_predictions_20260707_152914.csv"
 
     if input_workbook.exists():
         run_batch_predictions(input_workbook, output_csv, existing_csv=existing_csv)
@@ -166,7 +166,7 @@ def main():
     #latitude, longitude = 41.256331, -8.645468        # 36 simple
     #latitude, longitude = 38.024463, -7.712959        # 17
     #latitude, longitude = 39.701068, -8.910996        # 14 very difficult
-    #latitude, longitude = 41.088368507582, -6.81537789305259  # 36
+    # latitude, longitude = 41.088368507582, -6.81537789305259  # 36
     #latitude, longitude = 41.0893759030001, -6.81537262699993 # 131
     #latitude, longitude = 41.088695435, -6.81420591799997     # 17/19?
     #latitude, longitude = 41.088503121, -6.81459559899997     # 31
@@ -177,10 +177,12 @@ def main():
     #latitude, longitude = 41.088607396, -6.81463781499997     # 20
     #latitude, longitude = 41.089318, -6.813988                # 79
     #latitude, longitude = 41.0883129010001, -6.81497951799997  # 45
-    #latitude, longitude = 41.0883085036578, -6.81482510571329
-    latitude, longitude = 41.089591501;-6.80906635299993 #da 202 em vez de 7/5
-    latitude, longitude = 41.090633, -6.810231 # shoudl be 55, it is giving 82 (virado para o lado oposto)
-    latitude, longitude = 41.090763108, -6.81034417499995 #same problem, virado para a rua, devia dar 59, dá 92
+    #latitude, longitude = 41.0894836100001, -6.81600447899996
+    # latitude, longitude = 41.089591501;-6.80906635299993 #da 202 em vez de 7/5
+    #latitude, longitude = 41.090633, -6.810231 # shoudl be 55, it is giving 82 (virado para o lado oposto)
+    # latitude, longitude = 41.090763108, -6.81034417499995 #same problem, virado para a rua, devia dar 59, dá 92
+    # latitude, longitude = 41.0899111780001, -6.80824305099998
+    latitude, longitude = 41.0897176190001, -6.80928270699997
 
     preview_image = detector.street_view.get_image(latitude, longitude)
     if preview_image is not None:
