@@ -257,7 +257,7 @@
                 <div class="kpi-sub" id="kMatchSub">—</div>
             </div>
             <div class="kpi red">
-                <div class="kpi-label">Errado</div>
+                <div class="kpi-label">Update</div>
                 <div class="kpi-value" id="kWrong">0</div>
                 <div class="kpi-sub" id="kWrongSub">—</div>
             </div>
@@ -481,7 +481,7 @@
         const tabs = [
             { id: 'ALL',       label: `Todos (${total})`             },
             { id: 'MATCH',     label: `Match (${matched})`           },
-            { id: 'WRONG',     label: `Errado (${wrong})`            },
+            { id: 'WRONG',     label: `Update (${wrong})`            },
             { id: 'NOT_FOUND', label: `Nao encontrado (${notFound})` },
             { id: 'SN',        label: `SN (${sn})`                   },
         ];
@@ -516,7 +516,7 @@
     function badgeHtml(r) {
         if (isMatch(r))  return '<span class="badge b-match">Match</span>';
         if (!isFound(r)) return '<span class="badge b-notfound">Nao encontrado</span>';
-        return '<span class="badge b-wrong">Errado</span>';
+        return '<span class="badge b-wrong">Update</span>';
     }
     function confHtml(c) {
         const n = parseInt(c) || 0;
