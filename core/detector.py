@@ -6,6 +6,7 @@ os.environ["PADDLE_DISABLE_MKLDNN"] = "1"
 os.environ["FLAGS_enable_pir_in_executor"] = "0"  # disables PIR execution path on Windows
 
 import io
+from collections import defaultdict
 import logging
 import math
 import re
@@ -118,59 +119,59 @@ class DoorNumberDetector:
         h, w = image.shape[:2]
         return cv2.resize(image, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
 
-    # ── ZONE FINDER: MSER — finds character-like blobs without any model ───────
-    def _find_zones_mser(self, gray: np.ndarray) -> list[tuple[int, int, int, int]]:
-        clahe      = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        gray_clahe = clahe.apply(gray)
+    # # ── ZONE FINDER: MSER — finds character-like blobs without any model ───────
+    # def _find_zones_mser(self, gray: np.ndarray) -> list[tuple[int, int, int, int]]:
+    #     clahe      = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    #     gray_clahe = clahe.apply(gray)
 
-        all_raw_boxes: list[tuple[int, int, int, int]] = []
+    #     all_raw_boxes: list[tuple[int, int, int, int]] = []
 
-        for variant in [gray, gray_clahe]:
-            mser = cv2.MSER_create()
-            mser.setDelta(5)
-            mser.setMinArea(20)
-            mser.setMaxArea(3000)
-            regions, _ = mser.detectRegions(variant)
-            if regions:
-                all_raw_boxes += [
-                    cv2.boundingRect(r.reshape(-1, 1, 2)) for r in regions
-                ]
+    #     for variant in [gray, gray_clahe]:
+    #         mser = cv2.MSER_create()
+    #         mser.setDelta(5)
+    #         mser.setMinArea(20)
+    #         mser.setMaxArea(3000)
+    #         regions, _ = mser.detectRegions(variant)
+    #         if regions:
+    #             all_raw_boxes += [
+    #                 cv2.boundingRect(r.reshape(-1, 1, 2)) for r in regions
+    #             ]
 
-        char_boxes = [
-            (x, y, w, h) for x, y, w, h in all_raw_boxes
-            if h > 0 and 0.1 < (w / h) < 3.0 and h > 8
-        ]
+    #     char_boxes = [
+    #         (x, y, w, h) for x, y, w, h in all_raw_boxes
+    #         if h > 0 and 0.1 < (w / h) < 3.0 and h > 8
+    #     ]
 
-        if not char_boxes:
-            return []
+    #     if not char_boxes:
+    #         return []
 
-        deduped: list[tuple[int, int, int, int]] = []
-        for box in char_boxes:
-            x, y, w, h = box
-            if not any(abs(x - sx) < 5 and abs(y - sy) < 5 for sx, sy, *_ in deduped):
-                deduped.append(box)
+    #     deduped: list[tuple[int, int, int, int]] = []
+    #     for box in char_boxes:
+    #         x, y, w, h = box
+    #         if not any(abs(x - sx) < 5 and abs(y - sy) < 5 for sx, sy, *_ in deduped):
+    #             deduped.append(box)
 
-        deduped.sort(key=lambda b: b[0])
-        merged  = []
-        current = list(deduped[0])
+    #     deduped.sort(key=lambda b: b[0])
+    #     merged  = []
+    #     current = list(deduped[0])
 
-        for x, y, w, h in deduped[1:]:
-            gap      = x - (current[0] + current[2])
-            same_row = abs(y - current[1]) < current[3] * 0.8
-            if gap < current[3] * 1.5 and same_row:
-                x2 = max(current[0] + current[2], x + w)
-                y1 = min(current[1], y)
-                y2 = max(current[1] + current[3], y + h)
-                current = [current[0], y1, x2 - current[0], y2 - y1]
-            else:
-                merged.append(tuple(current))
-                current = [x, y, w, h]
+    #     for x, y, w, h in deduped[1:]:
+    #         gap      = x - (current[0] + current[2])
+    #         same_row = abs(y - current[1]) < current[3] * 0.8
+    #         if gap < current[3] * 1.5 and same_row:
+    #             x2 = max(current[0] + current[2], x + w)
+    #             y1 = min(current[1], y)
+    #             y2 = max(current[1] + current[3], y + h)
+    #             current = [current[0], y1, x2 - current[0], y2 - y1]
+    #         else:
+    #             merged.append(tuple(current))
+    #             current = [x, y, w, h]
 
-        merged.append(tuple(current))
-        word_boxes = [(x, y, w, h) for x, y, w, h in merged if w > 15]
+    #     merged.append(tuple(current))
+    #     word_boxes = [(x, y, w, h) for x, y, w, h in merged if w > 15]
 
-        logger.info(f"MSER found {len(word_boxes)} candidate zone(s)")
-        return word_boxes
+    #     logger.info(f"MSER found {len(word_boxes)} candidate zone(s)")
+    #     return word_boxes
 
     # ── Watermark helpers ──────────────────────────────────────────────────────
     # @staticmethod
@@ -437,12 +438,16 @@ class DoorNumberDetector:
     _EARLY_EXIT_MIN_DIGITS: int = 4
     _EARLY_EXIT_MIN_AGREE:  int = 3
 
+    # def _is_suspicious_number(self, num: str) -> bool:
+    #     """Numbers that need corroboration before early exit:
+    #     - Short (< 3 digits) — could be a cropped longer number
+    #     - Year-like (19xx/20xx) — likely Google watermark
+    #     """
+    #     return len(num) < self._EARLY_EXIT_MIN_DIGITS or bool(re.fullmatch(r"(19|20)\d{2}", num))
+
     def _is_suspicious_number(self, num: str) -> bool:
-        """Numbers that need corroboration before early exit:
-        - Short (< 3 digits) — could be a cropped longer number
-        - Year-like (19xx/20xx) — likely Google watermark
-        """
-        return len(num) < self._EARLY_EXIT_MIN_DIGITS or bool(re.fullmatch(r"(19|20)\d{2}", num))
+        """All numbers need corroboration — no length-based free pass."""
+        return True
 
     def _has_confident_result(self, candidates: list[dict]) -> bool:
         if not candidates:
@@ -641,6 +646,17 @@ class DoorNumberDetector:
                     "error":       "Image unavailable",
                 }
 
+            # Numbers visible across a wide heading range are likely large signs, not door plates
+            # offsets_by_number: dict[str, list[int]] = defaultdict(list)
+            # for c in all_image_candidates:
+            #     if c["number"] and c["confidence"] >= self.config.confidence_threshold:
+            #         offsets_by_number[c["number"]].append(c["heading"])
+
+            # heading_spread = {
+            #     num: max(offsets) - min(offsets)
+            #     for num, offsets in offsets_by_number.items()
+            # }
+
             confident_votes = Counter(
                 c["number"] for c in all_image_candidates
                 if c["number"] and c["confidence"] >= self.config.confidence_threshold
@@ -651,6 +667,7 @@ class DoorNumberDetector:
                 key=lambda c: (
                     c["confidence"],
                     confident_votes.get(c["number"], 0),
+                    # -heading_spread.get(c["number"], 0),  # narrower spread = better
                     len(c["number"]) if c["number"] else 0,
                 ),
             )

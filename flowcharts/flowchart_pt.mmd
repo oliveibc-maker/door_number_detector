@@ -1,0 +1,32 @@
+flowchart TD
+    A[("📄 Excel de Input\nNOME_COMPLETO_PORTA\nLAT / LON")] --> B
+
+    B["🔁 entrypoint.py\nBatch Runner"]
+
+    B --> E["🌐 Google Street View API\nget_image(lat, lon)\noffset + múltiplas direções"]
+
+    E --> F{"Imagem\ndisponível?"}
+    F -- Não --> G["❌ PREDICTION_FOUND = NÃO\nCONFIDÊNCIA = 0"]
+    F -- Sim --> H
+
+    subgraph OCR ["🔍 Motor OCR (detector.py)"]
+        H["Iterações de FOV · Direção · Pitch\nMúltiplas zonas de recorte por imagem"]
+        H --> I["PaddleOCR"]
+        I --> J["Extração do Número de Porta\nFiltro Regex (apenas dígitos, sem zeros à esquerda)\nPontuação por conf_sum + contagem de votos\nMelhor candidato = pontuação máxima entre as várias zonas da imagem"]
+    end
+
+    J --> K{"Corresponde?\nesperado == previsto"}
+    K -- Sim --> L["✓ MATCH"]
+    K -- Não --> M["✗ ERRADO / ? NÃO ENCONTRADO"]
+
+    L --> N
+    M --> N
+
+    N[("📊 CSV de Output\nLAT · LON · NOME\nPREVISÃO · CONFIANÇA\nPREDICTION_FOUND · MATCH")]
+
+    style A fill:#dbeafe,stroke:#3b82f6
+    style N fill:#dbeafe,stroke:#3b82f6
+    style G fill:#fef2f2,stroke:#ef4444
+    style L fill:#f0fdf4,stroke:#22c55e
+    style M fill:#fef2f2,stroke:#ef4444
+    style OCR fill:#faf5ff,stroke:#8
