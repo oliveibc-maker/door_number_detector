@@ -1,6 +1,5 @@
 import csv
 import json
-import socket
 import sys
 import threading
 from datetime import datetime
@@ -22,17 +21,6 @@ HTML_PATH = WEB_DIR / "templates" / "index.html"
 detector = DoorNumberDetector()
 
 _state = {"running": False, "csv_path": None, "total": 0, "error": None}
-
-
-def _get_local_ip() -> str:
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
 
 
 def _count_excel_rows(path: Path) -> int:
@@ -209,12 +197,12 @@ def create_server(host="0.0.0.0", port=8080):
 
 def main():
     server = create_server()
-    local_ip = _get_local_ip()
     print("=" * 50)
     print("Door Number Detector — Web Server")
     print("=" * 50)
-    print(f"Local:    http://127.0.0.1:8080")
-    print(f"Network:  http://{local_ip}:8080")
+    print("Local:    http://127.0.0.1:8080")
+    print("Network:  http://10.220.7.178:8080")
+    print("Network:  http://10.221.8.178:8080")
     print("=" * 50)
     print("Press Ctrl+C to stop.")
     try:
@@ -227,3 +215,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -18,6 +18,7 @@ ocr_debug/
 
 # Local data and logs
 *.log
+*.pid
 *.sqlite3
 *.db
 
