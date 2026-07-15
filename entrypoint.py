@@ -1,12 +1,20 @@
 """Project entry point for running the detector from the repository root."""
 
 import csv
+import re
 from datetime import datetime
 from pathlib import Path
+from typing import Literal, Optional
 
 import pandas as pd
+import pyodbc
 
+from core.config import Config
 from core.detector import DoorNumberDetector
+
+import sys
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 _OUTPUT_COLUMNS = [
@@ -15,10 +23,25 @@ _OUTPUT_COLUMNS = [
     "NOME_COMPLETO_PORTA",
     "PREDICTION",
     "CONFIDENCE",
-    "PREDICTION_FOUND",   # YES / NO
-    "MATCH",              # YES / NO
+    "PREDICTION_FOUND",
+    "MATCH",
 ]
 
+# Valid SQL Server columns to filter on
+_FILTER_COLUMNS = {
+    "localidade": "NOME_LOCALIDADE",
+    "freguesia":  "NOME_FREGUESIA",
+    "concelho":   "NOME_CONCELHO",
+    "rua":        "ID_RUA",
+}
+
+
+def _normalize(s: str) -> str:
+    """Uppercase and strip all spaces for loose comparison."""
+    return re.sub(r"\s+", "", s.strip().upper())
+
+
+# ── CSV helpers ────────────────────────────────────────────────────────────────
 
 def _init_output_csv(output_path: Path) -> None:
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -31,46 +54,92 @@ def _append_row_to_csv(output_path: Path, row_data: list) -> None:
 
 
 def _load_already_processed(existing_csv: Path) -> set[tuple[float, float]]:
-    """Return a set of (latitude, longitude) already present in an existing predictions CSV."""
+    """Return a set of (lat, lon) already present in an existing predictions CSV."""
     processed = set()
     with open(existing_csv, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f, delimiter=";")
         for row in reader:
             try:
-                lat = float(row["LATITUDE"])
-                lng = float(row["LONGITUDE"])
-                processed.add((lat, lng))
+                processed.add((float(row["LATITUDE"]), float(row["LONGITUDE"])))
             except (KeyError, ValueError):
                 continue
     return processed
 
 
-def run_batch_predictions(
-    input_path: str | Path,
-    output_path: str | Path,
-    existing_csv: str | Path | None = None,
+# ── SQL Server source ──────────────────────────────────────────────────────────
+
+def _query_sqlserver(
+    filter_by: Literal["localidade", "freguesia", "concelho", "rua"],
+    filter_value: str,
+    config: Config,
+) -> pd.DataFrame:
+    """Query SGM.SGM_PORTA filtered by the chosen geographic level."""
+    if filter_by not in _FILTER_COLUMNS:
+        raise ValueError(
+            f"filter_by must be one of {list(_FILTER_COLUMNS.keys())}, got '{filter_by}'"
+        )
+
+    column = _FILTER_COLUMNS[filter_by]
+
+    if config.src_db_trusted:
+        conn_str = (
+            f"DRIVER={{{config.src_db_driver}}};"
+            f"SERVER={config.src_db_server};"
+            f"DATABASE={config.src_db_database};"
+            "Trusted_Connection=yes;"
+        )
+    else:
+        conn_str = (
+            f"DRIVER={{{config.src_db_driver}}};"
+            f"SERVER={config.src_db_server};"
+            f"DATABASE={config.src_db_database};"
+            f"UID={config.src_db_user};"
+            f"PWD={config.src_db_password};"
+        )
+
+    query = f"""
+        SELECT
+            NOME_COMPLETO_PORTA,
+            LAT  AS LATITUDE,
+            LON  AS LONGITUDE
+        FROM [GEO_DB].[SGM].[SGM_PORTA]
+        WHERE {column} = ?
+          AND LAT IS NOT NULL
+          AND LON IS NOT NULL
+          AND ESTADO_PORTA NOT IN (N'Sinónimo', N'Apagado')
+    """
+
+    print(f"Connecting to {config.src_db_server} / {config.src_db_database} ...")
+    print(f"Filter: {column} = '{filter_value}'")
+    conn = pyodbc.connect(conn_str, timeout=30)
+    try:
+        df = pd.read_sql(query, conn, params=[filter_value])
+    finally:
+        conn.close()
+
+    if df.empty:
+        raise ValueError(f"No rows found for {column} = '{filter_value}'")
+
+    df["LATITUDE"]  = pd.to_numeric(df["LATITUDE"],  errors="coerce")
+    df["LONGITUDE"] = pd.to_numeric(df["LONGITUDE"], errors="coerce")
+    df = df.dropna(subset=["LATITUDE", "LONGITUDE"]).reset_index(drop=True)
+
+    print(f"Loaded {len(df)} rows for {column} = '{filter_value}'")
+    return df
+
+
+# ── Core detection loop (shared by both sources) ───────────────────────────────
+
+import logging
+logger = logging.getLogger(__name__)
+
+def _run_detection_on_df(
+    df: pd.DataFrame,
+    output_path: Path,
+    already_processed: set[tuple[float, float]],
+    existing_csv: Optional[Path] = None,
+    detector_instance=None,
 ) -> Path:
-    input_path  = Path(input_path)
-    output_path = Path(output_path).with_suffix(".csv")
-
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input workbook not found: {input_path}")
-
-    df = pd.read_excel(input_path)
-    required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
-    missing = required_columns.difference(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-    # ── Filter out already-processed rows ─────────────────────────────────────
-    already_processed: set[tuple[float, float]] = set()
-    if existing_csv is not None:
-        existing_csv = Path(existing_csv)
-        if not existing_csv.exists():
-            raise FileNotFoundError(f"Existing CSV not found: {existing_csv}")
-        already_processed = _load_already_processed(existing_csv)
-        print(f"Resuming from {existing_csv.name} — {len(already_processed)} rows already processed.")
-
     df_todo = df[
         ~df.apply(
             lambda r: (
@@ -93,7 +162,6 @@ def run_batch_predictions(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     _init_output_csv(output_path)
 
-    # ── Copy already-processed rows into the new file first ───────────────────
     if existing_csv is not None:
         with open(existing_csv, newline="", encoding="utf-8-sig") as src:
             reader = csv.DictReader(src, delimiter=";")
@@ -101,9 +169,12 @@ def run_batch_predictions(
                 _append_row_to_csv(output_path, [row.get(col, "") for col in _OUTPUT_COLUMNS])
         print(f"Copied {len(already_processed)} existing row(s) into {output_path.name}.")
 
-    detector = DoorNumberDetector()
+    _owns_detector = detector_instance is None
+    detector = detector_instance if detector_instance is not None else DoorNumberDetector()
+
     total   = len(df_todo)
     n_match = 0
+    n_error = 0
 
     try:
         for i, (_, row) in enumerate(df_todo.iterrows(), 1):
@@ -111,17 +182,37 @@ def run_batch_predictions(
             latitude  = row.get("LATITUDE")
             longitude = row.get("LONGITUDE")
 
-            if pd.isna(latitude) or pd.isna(longitude):
-                prediction       = None
-                confidence       = 0
-                prediction_found = "NO"
-            else:
-                result           = detector.detect_door_number(float(latitude), float(longitude))
-                prediction_found = "YES" if result.get("success", False) else "NO"
-                prediction       = result.get("door_number") if prediction_found == "YES" else None
-                confidence       = result.get("confidence", 0)
+            prediction       = None
+            confidence       = 0
+            prediction_found = "NO"
 
-            match = "YES" if (prediction is not None and nome != "" and prediction == nome) else "NO"
+            if pd.isna(latitude) or pd.isna(longitude):
+                logger.warning(f"[{i}/{total}] Skipping row with null coordinates.")
+            else:
+                try:
+                    result           = detector.detect_door_number(float(latitude), float(longitude))
+                    prediction_found = "YES" if result.get("success", False) else "NO"
+                    prediction       = result.get("door_number") if prediction_found == "YES" else None
+                    confidence       = result.get("confidence", 0)
+                except Exception as exc:
+                    n_error += 1
+                    logger.error(
+                        f"[{i}/{total}] detect_door_number raised an exception "
+                        f"at ({latitude}, {longitude}): {exc}",
+                        exc_info=True,
+                    )
+                    # Write a failed row and continue — do NOT let it kill the loop
+                    _append_row_to_csv(
+                        output_path,
+                        [latitude, longitude, nome, None, 0, "NO", "NO"],
+                    )
+                    continue
+
+            match = "YES" if (
+                prediction is not None
+                and nome != ""
+                and _normalize(prediction) == _normalize(nome)
+            ) else "NO"
             if match == "YES":
                 n_match += 1
 
@@ -130,58 +221,114 @@ def run_batch_predictions(
                 [latitude, longitude, nome, prediction, confidence, prediction_found, match],
             )
 
-            status = "✓ MATCH" if match == "YES" else ("✗ WRONG" if prediction_found == "YES" else "? NOT FOUND")
+            status = (
+                "✓ MATCH"    if match == "YES" else
+                "✗ WRONG"    if prediction_found == "YES" else
+                "? NOT FOUND"
+            )
             print(f"[{i}/{total}] expected={nome!r} predicted={prediction!r} ({confidence}%) {status}")
 
+    except Exception as fatal:
+        # Something outside the per-row try (e.g. CSV write failure) — log and re-raise
+        logger.critical(f"Fatal error at row {i}/{total}: {fatal}", exc_info=True)
+        raise
     finally:
-        detector.close()
+        if _owns_detector:
+            detector.close()
 
-    print(f"\nDone: {n_match}/{total} matched ({100 * n_match / total:.1f}%)")
+    print(f"\nDone: {n_match}/{total} matched ({100 * n_match / total:.1f}%) | {n_error} error(s)")
     print(f"Saved to {output_path}")
     return output_path
 
 
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
+def run_from_sqlserver(
+    filter_by: Literal["localidade", "freguesia", "concelho", "rua"],
+    filter_value: str,
+    output_path: str | Path,
+    existing_csv: str | Path | None = None,
+    detector_instance=None,
+) -> Path:
+    """Fetch rows from GEO_DB.SGM.SGM_PORTA and run detection."""
+    output_path = Path(output_path).with_suffix(".csv")
+    config      = Config()
+
+    df = _query_sqlserver(filter_by, filter_value, config)
+
+    already_processed: set[tuple[float, float]] = set()
+    if existing_csv is not None:
+        existing_csv = Path(existing_csv)
+        if not existing_csv.exists():
+            raise FileNotFoundError(f"Existing CSV not found: {existing_csv}")
+        already_processed = _load_already_processed(existing_csv)
+        print(f"Resuming from {existing_csv.name} — {len(already_processed)} rows already processed.")
+
+    return _run_detection_on_df(
+        df, output_path, already_processed, existing_csv,
+        detector_instance=detector_instance,
+    )
+
+
+def run_batch_predictions(
+    input_path: str | Path,
+    output_path: str | Path,
+    existing_csv: str | Path | None = None,
+    detector_instance=None,
+) -> Path:
+    """Load coordinates from an Excel workbook and run detection."""
+    input_path  = Path(input_path)
+    output_path = Path(output_path).with_suffix(".csv")
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input workbook not found: {input_path}")
+
+    df = pd.read_excel(input_path)
+    required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
+    missing = required_columns.difference(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    already_processed: set[tuple[float, float]] = set()
+    if existing_csv is not None:
+        existing_csv = Path(existing_csv)
+        if not existing_csv.exists():
+            raise FileNotFoundError(f"Existing CSV not found: {existing_csv}")
+        already_processed = _load_already_processed(existing_csv)
+        print(f"Resuming from {existing_csv.name} — {len(already_processed)} rows already processed.")
+
+    return _run_detection_on_df(
+        df, output_path, already_processed, existing_csv,
+        detector_instance=detector_instance,
+    )
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+
 def main():
-    # ── Batch mode ─────────────────────────────────────────────────────────────
-    project_root   = Path(__file__).resolve().parent
-    input_workbook = project_root / "Portas_Teste_2.xlsx"
-    ts             = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_csv     = project_root / f"Portas_Teste2_predictions_{ts}.csv"
+    project_root = Path(__file__).resolve().parent
+    ts           = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # To resume from an existing CSV, set this to the path of that file.
-    # Rows already present (matched by lat/lng) will be skipped.
-    # Results for missing rows will be written to output_csv (a new file).
-    existing_csv = None
-    # existing_csv = project_root / f"Portas_Teste2_predictions_20260707_152914.csv"
+    SOURCE       = "sqlserver"
+    FILTER_BY    = "rua"
+    FILTER_VALUE = "73789"
 
-    if input_workbook.exists():
+    if SOURCE == "sqlserver":
+        safe_name  = FILTER_VALUE.replace(" ", "_")
+        output_csv = project_root / f"predictions_{FILTER_BY}_{safe_name}_{ts}.csv"
+        existing_csv = Path(r"C:\Users\mafapereira\OneDrive - NOS SGPS, S.A\Documents\door_number_detector_new\predictions_rua_73789_20260715_103500.csv")
+        run_from_sqlserver(FILTER_BY, FILTER_VALUE, output_csv, existing_csv=existing_csv)
+        return
+
+    if SOURCE == "excel":
+        input_workbook = project_root / "Portas_Teste.xlsx"
+        output_csv     = project_root / f"Portas_Teste_predictions_{ts}.csv"
+        existing_csv   = None
         run_batch_predictions(input_workbook, output_csv, existing_csv=existing_csv)
         return
-    else:
-        print("No excel file with that name found. Proceeding with latitude/longitude sample...")
 
-    # ── Single coordinate mode ─────────────────────────────────────────────────
     detector = DoorNumberDetector()
-
-    #latitude, longitude = 41.256331, -8.645468        # 36 simple
-    #latitude, longitude = 38.024463, -7.712959        # 17
-    #latitude, longitude = 39.701068, -8.910996        # 14 very difficult
-    # latitude, longitude = 41.088368507582, -6.81537789305259  # 36
-    #latitude, longitude = 41.0893759030001, -6.81537262699993 # 131
-    #latitude, longitude = 41.088695435, -6.81420591799997     # 17/19?
-    #latitude, longitude = 41.088503121, -6.81459559899997     # 31
-    #latitude, longitude = 41.0883351100001, -6.81493620399993 # 43/56?
-    #latitude, longitude = 41.0881165805859, -6.8151718389904  # strange
-    #latitude, longitude = 41.0883242360001, -6.81522462599997 # 36
-    #latitude, longitude = 41.088532667, -6.81453213099996     # 22/29?
-    #latitude, longitude = 41.088607396, -6.81463781499997     # 20
-    #latitude, longitude = 41.089318, -6.813988                # 79
-    #latitude, longitude = 41.0883129010001, -6.81497951799997  # 45
-    #latitude, longitude = 41.0894836100001, -6.81600447899996
-    # latitude, longitude = 41.089591501;-6.80906635299993 #da 202 em vez de 7/5
-    #latitude, longitude = 41.090633, -6.810231 # shoudl be 55, it is giving 82 (virado para o lado oposto)
-    # latitude, longitude = 41.090763108, -6.81034417499995 #same problem, virado para a rua, devia dar 59, dá 92
-    # latitude, longitude = 41.0899111780001, -6.80824305099998
     latitude, longitude = 41.0897176190001, -6.80928270699997
 
     preview_image = detector.street_view.get_image(latitude, longitude)

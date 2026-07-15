@@ -30,51 +30,39 @@
             --amber-bg:      #fffbeb;
         }
 
-        body {
-            font-family: var(--font);
-            background: var(--bg);
-            color: var(--text);
-            font-size: 14px;
-            line-height: 1.5;
-            min-height: 100vh;
-        }
+        body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; min-height: 100vh; }
 
-        /* ── Header ── */
         header {
-            background: #0f172a;
-            color: white;
-            padding: 0 2rem;
-            height: 52px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 100;
+            background: #0f172a; color: white; padding: 0 2rem; height: 52px;
+            display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
         }
         .brand        { display: flex; align-items: baseline; gap: 10px; }
         .brand-name   { font-size: 14px; font-weight: 700; letter-spacing: -.02em; color: #f1f5f9; }
         .brand-sep    { color: #334155; }
         .brand-sub    { font-size: 12px; color: #475569; font-weight: 400; }
         .header-right { display: flex; align-items: center; gap: 14px; }
-
-        .status-badge {
-            font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 3px;
-            text-transform: uppercase; letter-spacing: .07em;
-        }
+        .status-badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: .07em; }
         .sb-idle    { background: #1e293b; color: #475569; }
         .sb-running { background: #1e3a5f; color: #93c5fd; }
         .sb-done    { background: #14532d; color: #86efac; }
         .sb-error   { background: #7f1d1d; color: #fca5a5; }
         .last-upd   { font-size: 11px; color: #334155; }
 
-        /* ── Layout ── */
-        main { max-width: 1160px; margin: 0 auto; padding: 2rem; }
+        .nav-tabs { background: #1e293b; padding: 0 2rem; display: flex; gap: 4px; }
+        .nav-tab {
+            padding: 8px 18px; font-size: 12px; font-weight: 600; color: #64748b;
+            border: none; background: none; cursor: pointer;
+            border-bottom: 2px solid transparent; font-family: var(--font); transition: all .15s;
+        }
+        .nav-tab:hover  { color: #94a3b8; }
+        .nav-tab.active { color: #f1f5f9; border-bottom-color: #1d4ed8; }
 
-        /* ── Upload screen ── */
-        #upload-screen {
+        main { max-width: 1300px; margin: 0 auto; padding: 2rem; }
+
+        .form-screen {
             display: flex; flex-direction: column; align-items: center;
-            justify-content: center; min-height: calc(100vh - 52px);
+            justify-content: center; min-height: calc(100vh - 88px);
         }
         .upload-card {
             background: var(--surface); border: 1px solid var(--border);
@@ -84,9 +72,8 @@
         .upload-card-sub   { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; line-height: 1.6; }
 
         .drop-zone {
-            border: 1.5px dashed var(--border); border-radius: 8px;
-            padding: 28px 24px; cursor: pointer; transition: all .18s;
-            background: var(--bg); margin-bottom: 16px;
+            border: 1.5px dashed var(--border); border-radius: 8px; padding: 28px 24px;
+            cursor: pointer; transition: all .18s; background: var(--bg); margin-bottom: 16px;
         }
         .drop-zone:hover, .drop-zone.over { border-color: var(--primary); background: var(--primary-light); }
         .drop-zone.loaded { border-style: solid; border-color: var(--primary); background: var(--primary-light); }
@@ -94,30 +81,38 @@
         .drop-hint  { font-size: 12px; color: var(--text-muted); }
         .drop-file  { font-size: 12px; font-weight: 600; color: var(--primary); margin-top: 10px; word-break: break-all; display: none; }
 
+        .form-group  { margin-bottom: 14px; text-align: left; }
+        .form-label  { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); display: block; margin-bottom: 6px; }
+        .form-select, .form-input {
+            width: 100%; padding: 9px 12px; border: 1.5px solid var(--border); border-radius: 7px;
+            font-family: var(--font); font-size: 14px; background: var(--bg); color: var(--text);
+            transition: border-color .15s; outline: none;
+        }
+        .form-select:focus, .form-input:focus { border-color: var(--primary); background: var(--primary-light); }
+        .form-input::placeholder { color: var(--text-faint); }
+
         .btn-run {
             width: 100%; padding: 11px; border: none; border-radius: 7px;
             background: var(--primary); color: white; font-family: var(--font);
             font-size: 14px; font-weight: 600; letter-spacing: -.01em;
-            cursor: pointer; transition: background .15s;
+            cursor: pointer; transition: background .15s; margin-top: 4px;
         }
         .btn-run:hover:not(:disabled) { background: var(--primary-dark); }
         .btn-run:disabled { background: #cbd5e1; color: #94a3b8; cursor: not-allowed; }
 
-        /* ── Dashboard ── */
-        #dashboard { display: none; }
+        #dashboard  { display: none; }
         .section    { margin-bottom: 16px; }
 
-        /* Progress strip */
         .progress-strip {
             background: var(--surface); border: 1px solid var(--border);
             border-radius: 8px; padding: 13px 18px;
             display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
         }
-        .progress-label     { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; flex-shrink: 0; }
-        .progress-label b   { color: var(--primary); font-weight: 700; }
-        .progress-track     { flex: 1; min-width: 80px; height: 5px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
-        .progress-fill      { height: 100%; background: var(--primary); border-radius: 3px; transition: width .5s ease; }
-        .progress-pct       { font-size: 12px; font-weight: 700; color: var(--primary); white-space: nowrap; min-width: 32px; text-align: right; }
+        .progress-label   { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; flex-shrink: 0; }
+        .progress-label b { color: var(--primary); font-weight: 700; }
+        .progress-track   { flex: 1; min-width: 80px; height: 5px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+        .progress-fill    { height: 100%; background: var(--primary); border-radius: 3px; transition: width .5s ease; }
+        .progress-pct     { font-size: 12px; font-weight: 700; color: var(--primary); white-space: nowrap; min-width: 32px; text-align: right; }
         .btn-new {
             border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
             font-family: var(--font); font-size: 12px; font-weight: 500;
@@ -125,20 +120,25 @@
         }
         .btn-new:hover { border-color: var(--text-muted); color: var(--text); }
 
-        /* KPI row */
+        .source-badge {
+            font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 3px;
+            text-transform: uppercase; letter-spacing: .07em; flex-shrink: 0;
+        }
+        .sb-excel { background: #e0f2fe; color: #0369a1; }
+        .sb-db    { background: #fae8ff; color: #7e22ce; }
+
         .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
         .kpi {
             background: var(--surface); border: 1px solid var(--border);
             border-top: 3px solid var(--border); border-radius: 8px; padding: 15px 18px;
         }
-        .kpi.green { border-top-color: #22c55e; } .kpi.green .kpi-value { color: var(--green); }
-        .kpi.red   { border-top-color: #ef4444; } .kpi.red   .kpi-value { color: var(--red);   }
-        .kpi.amber { border-top-color: #f59e0b; } .kpi.amber .kpi-value { color: var(--amber); }
+        .kpi.green  { border-top-color: #22c55e; } .kpi.green  .kpi-value { color: var(--green); }
+        .kpi.red    { border-top-color: #ef4444; } .kpi.red    .kpi-value { color: var(--red);   }
+        .kpi.amber  { border-top-color: #f59e0b; } .kpi.amber  .kpi-value { color: var(--amber); }
         .kpi-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px; }
         .kpi-value { font-size: 30px; font-weight: 800; color: var(--text); line-height: 1; letter-spacing: -.04em; }
         .kpi-sub   { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
 
-        /* Accuracy banner */
         .acc {
             background: var(--primary); border-radius: 8px; padding: 18px 24px;
             display: flex; justify-content: space-between; align-items: center; color: white; gap: 16px; flex-wrap: wrap;
@@ -150,7 +150,6 @@
         .acc-right { text-align: right; flex-shrink: 0; }
         .acc-right .acc-value { font-size: 20px; }
 
-        /* Table cards */
         .table-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
         .tc-header  {
             padding: 11px 16px; border-bottom: 1px solid var(--border);
@@ -158,6 +157,14 @@
         }
         .tc-title { font-size: 13px; font-weight: 600; color: var(--text); }
         .tc-sub   { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
+
+        .view-toggle { display: flex; gap: 2px; background: var(--bg); border-radius: 6px; padding: 3px; }
+        .vtab {
+            padding: 4px 14px; border: none; border-radius: 4px; cursor: pointer;
+            font-family: var(--font); font-size: 12px; font-weight: 500;
+            background: none; color: var(--text-muted); transition: all .12s;
+        }
+        .vtab.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 
         .tabs { display: flex; gap: 2px; }
         .tab  {
@@ -168,8 +175,17 @@
         .tab:hover  { background: var(--bg); color: var(--text); }
         .tab.active { background: #dbeafe; color: var(--primary); font-weight: 600; }
 
-        table   { width: 100%; border-collapse: collapse; }
-        th      {
+        .grouped-info-bar {
+            padding: 7px 16px; background: #f8fafc; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        }
+        .dup-warn {
+            font-size: 11px; font-weight: 600; color: #5b21b6;
+            background: #ede9fe; padding: 2px 10px; border-radius: 3px;
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        th    {
             font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
             color: var(--text-muted); padding: 9px 14px; background: #f8fafc;
             border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap;
@@ -184,15 +200,18 @@
         tr.r-wrong    td:first-child { border-left: 3px solid #ef4444; }
         tr.r-notfound td:first-child { border-left: 3px solid #f59e0b; }
 
+        tr.r-multi-loc            { background: #faf5ff; }
+        tr.r-multi-loc td:first-child { border-left: 3px solid #7c3aed; }
+
+        .door-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+        .loc-summary { display: flex; gap: 4px; flex-wrap: wrap; }
+
         .mono  { font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; font-weight: 600; font-size: 13px; }
-        .badge {
-            display: inline-block; font-size: 10px; font-weight: 700;
-            padding: 2px 7px; border-radius: 3px;
-            text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
-        }
+        .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
         .b-match    { background: #dcfce7; color: #166534; }
         .b-wrong    { background: #fee2e2; color: #991b1b; }
         .b-notfound { background: #fef3c7; color: #78350f; }
+        .b-multi    { background: #ede9fe; color: #5b21b6; }
 
         .conf-wrap { display: flex; align-items: center; gap: 8px; }
         .conf-bar  { width: 48px; height: 3px; background: #e2e8f0; border-radius: 2px; overflow: hidden; flex-shrink: 0; }
@@ -202,12 +221,13 @@
         .map-link { font-size: 12px; font-weight: 500; color: var(--primary); text-decoration: none; white-space: nowrap; }
         .map-link:hover { text-decoration: underline; }
 
+        .coords-text { font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; white-space: nowrap; }
+
         .divider       { display: flex; align-items: center; gap: 14px; margin: 24px 0 14px; }
         .divider-line  { flex: 1; height: 1px; background: var(--border); }
         .divider-label { font-size: 11px; font-weight: 700; color: var(--red); text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
 
         .empty-row td { text-align: center; padding: 28px; color: var(--text-faint); font-size: 13px; }
-
         .idx { color: var(--text-faint); font-size: 11px; font-family: ui-monospace, monospace; }
 
         @media (max-width: 680px) {
@@ -231,14 +251,18 @@
     </div>
 </header>
 
+<div class="nav-tabs">
+    <button class="nav-tab active" id="tab-excel" onclick="switchTab('excel')">Excel</button>
+    <button class="nav-tab"        id="tab-sql"   onclick="switchTab('sql')">Base de Dados</button>
+</div>
+
 <main>
 
-    <!-- Upload Screen -->
-    <div id="upload-screen">
+    <!-- ══ EXCEL FORM ══ -->
+    <div id="excel-form" class="form-screen">
         <div class="upload-card">
             <div class="upload-card-title">Validação de Moradas</div>
             <div class="upload-card-sub">Seleciona o ficheiro Excel com as moradas.<br>O pipeline corre automaticamente após a submissão.</div>
-
             <div class="drop-zone" id="dropZone"
                 onclick="document.getElementById('fileInput').click()"
                 ondragover="onDragOver(event)"
@@ -249,27 +273,48 @@
                 <div class="drop-file" id="dropFile"></div>
             </div>
             <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" onchange="onFileChange(event)">
-
-            <button class="btn-run" id="btnRun" disabled onclick="uploadAndRun()">
-                Executar Pipeline
-            </button>
+            <button class="btn-run" id="btnRun" disabled onclick="uploadAndRun()">Executar Pipeline</button>
         </div>
     </div>
 
-    <!-- Dashboard -->
+    <!-- ══ SQL FORM ══ -->
+    <div id="sql-form" class="form-screen" style="display:none">
+        <div class="upload-card">
+            <div class="upload-card-title">Consulta por Base de Dados</div>
+            <div class="upload-card-sub">Seleciona o filtro geográfico e introduz o valor.<br>O pipeline vai buscar as moradas à GEO_DB e corre automaticamente.</div>
+            <div class="form-group">
+                <label class="form-label">Filtro Geográfico</label>
+                <select id="filterBy" class="form-select" onchange="onSqlInput()">
+                    <option value="localidade">Localidade</option>
+                    <option value="freguesia">Freguesia</option>
+                    <option value="concelho">Concelho</option>
+                    <option value="rua">Rua (ID_RUA)</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:16px">
+                <label class="form-label">Valor</label>
+                <input type="text" id="filterValue" class="form-input"
+                    placeholder="Ex: Lisboa, Cascais, 73789..."
+                    oninput="onSqlInput()"
+                    onkeydown="if(event.key==='Enter' && !document.getElementById('btnSql').disabled) runSqlServer()">
+            </div>
+            <button class="btn-run" id="btnSql" disabled onclick="runSqlServer()">Executar Pipeline</button>
+        </div>
+    </div>
+
+    <!-- ══ DASHBOARD ══ -->
     <div id="dashboard">
 
-        <!-- Progress -->
         <div class="section">
             <div class="progress-strip">
+                <span class="source-badge" id="sourceBadge" style="display:none"></span>
                 <div class="progress-label">A processar: <b id="progDone">0</b> de <b id="progTotal">—</b> moradas</div>
                 <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
                 <div class="progress-pct" id="progressPct"></div>
-                <button class="btn-new" onclick="resetToUpload()">Novo batch</button>
+                <button class="btn-new" onclick="resetToForms()">Novo batch</button>
             </div>
         </div>
 
-        <!-- KPIs -->
         <div class="section kpi-row">
             <div class="kpi">
                 <div class="kpi-label">Total Processado</div>
@@ -281,7 +326,7 @@
                 <div class="kpi-sub" id="kMatchSub">—</div>
             </div>
             <div class="kpi red">
-                <div class="kpi-label">Errado</div>
+                <div class="kpi-label">Upgrade</div>
                 <div class="kpi-value" id="kWrong">0</div>
                 <div class="kpi-sub" id="kWrongSub">—</div>
             </div>
@@ -292,11 +337,10 @@
             </div>
         </div>
 
-        <!-- Accuracy banner -->
         <div class="section">
             <div class="acc">
                 <div>
-                    <div class="acc-label">Precisao Efetiva  —  excl. moradas SN</div>
+                    <div class="acc-label">Precisao Efetiva — excl. moradas SN</div>
                     <div class="acc-value" id="accValue">—</div>
                     <div class="acc-bar"><div class="acc-fill" id="accFill" style="width:0%"></div></div>
                 </div>
@@ -307,7 +351,7 @@
             </div>
         </div>
 
-        <!-- Full results table -->
+        <!-- ══ MAIN TABLE CARD ══ -->
         <div class="section">
             <div class="table-card">
                 <div class="tc-header">
@@ -315,33 +359,65 @@
                         <div class="tc-title">Todos os Resultados</div>
                         <div class="tc-sub" id="tcSub1">—</div>
                     </div>
-                    <div class="tabs" id="filterTabs"></div>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <div class="view-toggle">
+                            <button class="vtab active" id="vtab-list"    onclick="setView('list')">Lista</button>
+                            <button class="vtab"        id="vtab-grouped" onclick="setView('grouped')">Por Localização</button>
+                        </div>
+                        <div class="tabs" id="filterTabs"></div>
+                    </div>
                 </div>
-                <div style="overflow-x:auto">
+
+                <!-- List view -->
+                <div id="view-list" style="overflow-x:auto">
                     <table>
                         <thead>
                             <tr>
                                 <th>#</th>
                                 <th>Esperado</th>
                                 <th>Previsto</th>
-                                <th>Confianca</th>
+                                <th>Confiança</th>
                                 <th>Estado</th>
+                                <th>Mapa</th>
+                                <th>Coordenadas</th>
                             </tr>
                         </thead>
                         <tbody id="tbody1"></tbody>
                     </table>
                 </div>
+
+                <!-- Grouped view -->
+                <div id="view-grouped" style="display:none">
+                    <div class="grouped-info-bar">
+                        <span class="tc-sub" id="tcSubGrouped">—</span>
+                        <span class="dup-warn" id="dupWarn" style="display:none"></span>
+                    </div>
+                    <div style="overflow-x:auto">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Coordenadas</th>
+                                    <th>Mapa</th>
+                                    <th>Previsto (OCR)</th>
+                                    <th>Confiança</th>
+                                    <th>Portas na BD</th>
+                                    <th>Resumo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbodyGrouped"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Divider -->
         <div class="divider">
             <div class="divider-line"></div>
             <div class="divider-label">Moradas nao correspondentes — verificacao manual</div>
             <div class="divider-line"></div>
         </div>
 
-        <!-- Non-match table -->
         <div class="section">
             <div class="table-card">
                 <div class="tc-header">
@@ -357,9 +433,10 @@
                                 <th>#</th>
                                 <th>Esperado</th>
                                 <th>Previsto</th>
-                                <th>Confianca</th>
+                                <th>Confiança</th>
                                 <th>Estado</th>
                                 <th>Mapa</th>
+                                <th>Coordenadas</th>
                             </tr>
                         </thead>
                         <tbody id="tbody2"></tbody>
@@ -368,7 +445,7 @@
             </div>
         </div>
 
-    </div>
+    </div><!-- /dashboard -->
 </main>
 
 <script>
@@ -376,9 +453,17 @@
     let allRows      = [];
     let activeFilter = 'ALL';
     let pollTimer    = null;
+    let currentTab   = 'excel';
+    let activeSource = 'excel';
+    let currentView  = 'list';
     const POLL_MS    = 3000;
 
-    // ── On load: check if a batch is already running or done ──────────────────
+    function isDashboardVisible() {
+        // Check both inline style and computed style to handle CSS-hidden elements
+        const el = document.getElementById('dashboard');
+        return el.style.display === 'block' || getComputedStyle(el).display !== 'none';
+    }
+
     window.addEventListener('DOMContentLoaded', async () => {
         try {
             const data = await getStatus();
@@ -391,18 +476,22 @@
         } catch { /* server not ready yet */ }
     });
 
+    // ── Tab switching ─────────────────────────────────────────────────────────
+    function switchTab(tab) {
+        currentTab = tab;
+        document.getElementById('tab-excel').classList.toggle('active', tab === 'excel');
+        document.getElementById('tab-sql').classList.toggle('active',   tab === 'sql');
+        // Only swap forms if dashboard is not currently shown
+        if (!isDashboardVisible()) {
+            document.getElementById('excel-form').style.display = tab === 'excel' ? 'flex' : 'none';
+            document.getElementById('sql-form').style.display   = tab === 'sql'   ? 'flex' : 'none';
+        }
+    }
+
     // ── File selection ────────────────────────────────────────────────────────
-    function onFileChange(e) {
-        const f = e.target.files?.[0];
-        if (f) setFile(f);
-    }
-    function onDragOver(e) {
-        e.preventDefault();
-        document.getElementById('dropZone').classList.add('over');
-    }
-    function onDragLeave() {
-        document.getElementById('dropZone').classList.remove('over');
-    }
+    function onFileChange(e) { const f = e.target.files?.[0]; if (f) setFile(f); }
+    function onDragOver(e)   { e.preventDefault(); document.getElementById('dropZone').classList.add('over'); }
+    function onDragLeave()   { document.getElementById('dropZone').classList.remove('over'); }
     function onDrop(e) {
         e.preventDefault();
         document.getElementById('dropZone').classList.remove('over');
@@ -411,58 +500,116 @@
     }
     function setFile(f) {
         excelFile = f;
-        const zone = document.getElementById('dropZone');
-        zone.classList.add('loaded');
+        document.getElementById('dropZone').classList.add('loaded');
         const label = document.getElementById('dropFile');
-        label.textContent = f.name;
+        label.textContent   = f.name;
         label.style.display = 'block';
         document.getElementById('btnRun').disabled = false;
     }
 
-    // ── Upload & run ──────────────────────────────────────────────────────────
+    // ── SQL form input ────────────────────────────────────────────────────────
+    function onSqlInput() {
+        const val = document.getElementById('filterValue').value.trim();
+        document.getElementById('btnSql').disabled = !val;
+    }
+
+    // ── Upload & run (Excel) ──────────────────────────────────────────────────
     async function uploadAndRun() {
         if (!excelFile) return;
         const btn = document.getElementById('btnRun');
-        btn.disabled = true;
+        btn.disabled    = true;
         btn.textContent = 'A enviar...';
         try {
             const bytes = await excelFile.arrayBuffer();
             const resp  = await fetch('/api/upload?filename=' + encodeURIComponent(excelFile.name), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/octet-stream' },
-                body: bytes,
+                method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes,
             });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || 'Erro no servidor');
-            }
+            if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Erro no servidor'); }
+            activeSource = 'excel';
             showDashboard();
             startPolling();
         } catch (e) {
             alert('Erro ao iniciar o pipeline: ' + e.message);
-            btn.disabled = false;
+            btn.disabled    = false;
+            btn.textContent = 'Executar Pipeline';
+        }
+    }
+
+    // ── Run SQL Server ────────────────────────────────────────────────────────
+    async function runSqlServer() {
+        const filterBy    = document.getElementById('filterBy').value;
+        const filterValue = document.getElementById('filterValue').value.trim();
+        if (!filterValue) return;
+        const btn = document.getElementById('btnSql');
+        btn.disabled    = true;
+        btn.textContent = 'A consultar BD...';
+        try {
+            const resp = await fetch('/api/run_sqlserver', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `filter_by=${encodeURIComponent(filterBy)}&filter_value=${encodeURIComponent(filterValue)}`,
+            });
+            if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Erro no servidor'); }
+            activeSource = 'sql';
+            showDashboard();
+            startPolling();
+        } catch (e) {
+            alert('Erro ao iniciar o pipeline: ' + e.message);
+            btn.disabled    = false;
             btn.textContent = 'Executar Pipeline';
         }
     }
 
     // ── Dashboard control ─────────────────────────────────────────────────────
     function showDashboard() {
-        document.getElementById('upload-screen').style.display = 'none';
-        document.getElementById('dashboard').style.display     = 'block';
+        document.getElementById('excel-form').style.display = 'none';
+        document.getElementById('sql-form').style.display   = 'none';
+        document.getElementById('dashboard').style.display  = 'block';
+        const badge = document.getElementById('sourceBadge');
+        if (activeSource === 'sql') {
+            badge.textContent   = 'Base de Dados';
+            badge.className     = 'source-badge sb-db';
+            badge.style.display = 'inline-block';
+        } else {
+            badge.textContent   = 'Excel';
+            badge.className     = 'source-badge sb-excel';
+            badge.style.display = 'inline-block';
+        }
     }
-    function resetToUpload() {
+
+    function resetToForms() {
         clearInterval(pollTimer);
-        allRows = []; activeFilter = 'ALL'; excelFile = null;
-        document.getElementById('upload-screen').style.display = 'flex';
-        document.getElementById('dashboard').style.display     = 'none';
+        allRows = []; activeFilter = 'ALL'; excelFile = null; currentView = 'list';
+        document.getElementById('dashboard').style.display  = 'none';
+        document.getElementById('excel-form').style.display = currentTab === 'excel' ? 'flex' : 'none';
+        document.getElementById('sql-form').style.display   = currentTab === 'sql'   ? 'flex' : 'none';
         document.getElementById('dropZone').classList.remove('loaded', 'over');
         document.getElementById('dropFile').style.display = 'none';
         document.getElementById('dropFile').textContent   = '';
         document.getElementById('fileInput').value        = '';
         document.getElementById('btnRun').disabled        = true;
         document.getElementById('btnRun').textContent     = 'Executar Pipeline';
+        document.getElementById('filterValue').value      = '';
+        document.getElementById('btnSql').disabled        = true;
+        document.getElementById('btnSql').textContent     = 'Executar Pipeline';
+        document.getElementById('view-list').style.display    = '';
+        document.getElementById('view-grouped').style.display = 'none';
+        document.getElementById('vtab-list').classList.add('active');
+        document.getElementById('vtab-grouped').classList.remove('active');
+        document.getElementById('filterTabs').style.display   = 'flex';
         setStatusBadge('idle');
         document.getElementById('lastUpd').textContent = '';
+        document.getElementById('sourceBadge').style.display = 'none';
+    }
+
+    // ── View toggle ───────────────────────────────────────────────────────────
+    function setView(v) {
+        currentView = v;
+        document.getElementById('vtab-list').classList.toggle('active',    v === 'list');
+        document.getElementById('vtab-grouped').classList.toggle('active', v === 'grouped');
+        document.getElementById('view-list').style.display    = v === 'list'    ? '' : 'none';
+        document.getElementById('view-grouped').style.display = v === 'grouped' ? '' : 'none';
+        document.getElementById('filterTabs').style.display   = v === 'list'    ? 'flex' : 'none';
     }
 
     // ── Polling ───────────────────────────────────────────────────────────────
@@ -476,8 +623,7 @@
             const data = await getStatus();
             allRows = data.rows || [];
             applyData(data);
-            document.getElementById('lastUpd').textContent =
-                'Atualizado: ' + new Date().toLocaleTimeString('pt-PT');
+            document.getElementById('lastUpd').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-PT');
         } catch { /* ignore */ }
     }
     async function getStatus() {
@@ -488,13 +634,13 @@
 
     // ── Data application ──────────────────────────────────────────────────────
     function applyData(data) {
-        if      (data.error)               setStatusBadge('error');
-        else if (data.running)             setStatusBadge('running');
-        else if (allRows.length > 0)       setStatusBadge('done');
-        else                               setStatusBadge('idle');
+        if      (data.error)         setStatusBadge('error');
+        else if (data.running)       setStatusBadge('running');
+        else if (allRows.length > 0) setStatusBadge('done');
+        else                         setStatusBadge('idle');
 
         const total    = allRows.length;
-        const expected = data.total || total;
+        const expected = data.total || 0;
         const matched  = allRows.filter(isMatch).length;
         const notFound = allRows.filter(r => !isFound(r)).length;
         const wrong    = total - matched - notFound;
@@ -502,15 +648,13 @@
         const effTotal = total - sn;
         const effMatch = allRows.filter(r => isMatch(r) && !isSN(r)).length;
         const effPct   = effTotal ? effMatch / effTotal * 100 : 0;
-        const runPct   = expected ? Math.min(100, total / expected * 100) : (total > 0 ? 100 : 0);
+        const runPct   = expected ? Math.min(100, total / expected * 100) : 0;
 
-        // Progress
         document.getElementById('progDone').textContent      = total;
         document.getElementById('progTotal').textContent     = expected || '—';
         document.getElementById('progressFill').style.width  = runPct + '%';
         document.getElementById('progressPct').textContent   = expected ? runPct.toFixed(0) + '%' : '';
 
-        // KPIs
         document.getElementById('kTotal').textContent    = total;
         document.getElementById('kMatch').textContent    = matched;
         document.getElementById('kMatchSub').textContent = total ? pct(matched, total) + ' do total' : '—';
@@ -519,15 +663,14 @@
         document.getElementById('kNF').textContent       = notFound;
         document.getElementById('kNFSub').textContent    = total ? pct(notFound, total) + ' do total' : '—';
 
-        // Accuracy
-        document.getElementById('accValue').textContent  = effTotal ? effPct.toFixed(1) + '%' : '—';
-        document.getElementById('accFrac').textContent   = effTotal ? `${effMatch} / ${effTotal}` : '— / —';
-        document.getElementById('accFill').style.width   = effPct + '%';
-
-        document.getElementById('tcSub1').textContent = `${total} registo${total !== 1 ? 's' : ''}`;
+        document.getElementById('accValue').textContent = effTotal ? effPct.toFixed(1) + '%' : '—';
+        document.getElementById('accFrac').textContent  = effTotal ? `${effMatch} / ${effTotal}` : '— / —';
+        document.getElementById('accFill').style.width  = effPct + '%';
+        document.getElementById('tcSub1').textContent   = `${total} registo${total !== 1 ? 's' : ''}`;
 
         renderFilterTabs(total, matched, wrong, notFound, sn);
         renderMainTable();
+        renderGroupedTable();
         renderNonMatchTable();
     }
 
@@ -542,13 +685,12 @@
         const tabs = [
             { id: 'ALL',       label: `Todos (${total})`             },
             { id: 'MATCH',     label: `Match (${matched})`           },
-            { id: 'WRONG',     label: `Errado (${wrong})`            },
+            { id: 'WRONG',     label: `Upgrade (${wrong})`           },
             { id: 'NOT_FOUND', label: `Nao encontrado (${notFound})` },
             { id: 'SN',        label: `SN (${sn})`                   },
         ];
         document.getElementById('filterTabs').innerHTML = tabs.map(t =>
-            `<button class="tab${t.id === activeFilter ? ' active' : ''}"
-                onclick="setFilter('${t.id}')">${t.label}</button>`
+            `<button class="tab${t.id === activeFilter ? ' active' : ''}" onclick="setFilter('${t.id}')">${t.label}</button>`
         ).join('');
     }
     function setFilter(f) {
@@ -571,44 +713,119 @@
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    function rowClass(r) { return isMatch(r) ? 'r-match' : !isFound(r) ? 'r-notfound' : 'r-wrong'; }
+    // ── Coord grouping ────────────────────────────────────────────────────────
+    function groupByCoords() {
+        const map = new Map();
+        for (const r of allRows) {
+            const key = `${r.LATITUDE}|${r.LONGITUDE}`;
+            if (!map.has(key)) {
+                map.set(key, { lat: r.LATITUDE, lon: r.LONGITUDE, prediction: r.PREDICTION, confidence: r.CONFIDENCE, rows: [] });
+            }
+            map.get(key).rows.push(r);
+        }
+        return [...map.values()].sort((a, b) => b.rows.length - a.rows.length);
+    }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function rowClass(r)  { return isMatch(r) ? 'r-match' : !isFound(r) ? 'r-notfound' : 'r-wrong'; }
     function badgeHtml(r) {
         if (isMatch(r))  return '<span class="badge b-match">Match</span>';
         if (!isFound(r)) return '<span class="badge b-notfound">Nao encontrado</span>';
-        return '<span class="badge b-wrong">Errado</span>';
+        return '<span class="badge b-wrong">Upgrade</span>';
     }
     function confHtml(c) {
         const n = parseInt(c) || 0;
-        return `<div class="conf-wrap">
-            <div class="conf-bar"><div class="conf-fill" style="width:${n}%"></div></div>
-            <span class="conf-text">${n}%</span>
-        </div>`;
+        return `<div class="conf-wrap"><div class="conf-bar"><div class="conf-fill" style="width:${n}%"></div></div><span class="conf-text">${n}%</span></div>`;
     }
     function mapHtml(r) {
         const { LATITUDE: lat, LONGITUDE: lon } = r;
         if (!lat || !lon) return '—';
-        return `<a class="map-link" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">Ver no mapa &nearr;</a>`;
+        return `<a class="map-link" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">Ver ↗</a>`;
+    }
+    function coordsHtml(r) {
+        const { LATITUDE: lat, LONGITUDE: lon } = r;
+        if (!lat || !lon) return '<span style="color:var(--text-faint)">—</span>';
+        return `<span class="coords-text">${lat}, ${lon}</span>`;
     }
     function idxTd(n) { return `<td class="idx">${n}</td>`; }
 
-    // ── Main table ────────────────────────────────────────────────────────────
+    // ── Main table (list view) ────────────────────────────────────────────────
     function renderMainTable() {
         const rows  = filteredRows();
         const tbody = document.getElementById('tbody1');
         if (!rows.length) {
-            tbody.innerHTML = `<tr class="empty-row"><td colspan="5">Sem resultados nesta categoria.</td></tr>`;
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="7">Sem resultados nesta categoria.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
-            return `<tr class="${rowClass(r)}">
-                ${idxTd(idx)}
+            return `<tr class="${rowClass(r)}">${idxTd(idx)}
                 <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
                 <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
+                <td>${mapHtml(r)}</td>
+                <td>${coordsHtml(r)}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    // ── Grouped table (by location) ───────────────────────────────────────────
+    function renderGroupedTable() {
+        const groups   = groupByCoords();
+        const tbody    = document.getElementById('tbodyGrouped');
+        const dupCount = groups.filter(g => g.rows.length > 1).length;
+
+        document.getElementById('tcSubGrouped').textContent =
+            `${groups.length} localização${groups.length !== 1 ? 'ões' : ''} única${groups.length !== 1 ? 's' : ''}`;
+
+        const dupWarn = document.getElementById('dupWarn');
+        if (dupCount > 0) {
+            dupWarn.textContent   = `⚠ ${dupCount} com múltiplas portas — OCR redundante no backend`;
+            dupWarn.style.display = 'inline-block';
+        } else {
+            dupWarn.style.display = 'none';
+        }
+
+        if (!groups.length) {
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="7">Sem dados.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = groups.map((g, i) => {
+            const matched  = g.rows.filter(isMatch).length;
+            const upgraded = g.rows.filter(r => !isMatch(r) && isFound(r)).length;
+            const notFound = g.rows.filter(r => !isFound(r)).length;
+            const isMulti  = g.rows.length > 1;
+
+            const doorsHtml = `<div class="door-badges">${g.rows.map(r => {
+                const cls = isMatch(r) ? 'b-match' : !isFound(r) ? 'b-notfound' : 'b-wrong';
+                return `<span class="badge ${cls}" title="${isMatch(r) ? 'Match' : !isFound(r) ? 'Nao encontrado' : 'Upgrade'}">${r.NOME_COMPLETO_PORTA || '—'}</span>`;
+            }).join('')}</div>`;
+
+            const coords  = (g.lat && g.lon) ? `${g.lat}, ${g.lon}` : '—';
+            const mapLink = (g.lat && g.lon)
+                ? `<a class="map-link" href="https://www.google.com/maps?q=${g.lat},${g.lon}" target="_blank">Ver ↗</a>`
+                : '—';
+
+            const summaryParts = [];
+            if (matched)  summaryParts.push(`<span class="badge b-match">${matched} ✓</span>`);
+            if (upgraded) summaryParts.push(`<span class="badge b-wrong">${upgraded} ↑</span>`);
+            if (notFound) summaryParts.push(`<span class="badge b-notfound">${notFound} ?</span>`);
+            const summary = `<div class="loc-summary">${summaryParts.join('')}</div>`;
+
+            const multiTag = isMulti
+                ? `&nbsp;<span class="badge b-multi">${g.rows.length}×</span>`
+                : '';
+
+            return `<tr class="${isMulti ? 'r-multi-loc' : ''}">
+                <td class="idx">${i + 1}${multiTag}</td>
+                <td><span class="coords-text">${coords}</span></td>
+                <td>${mapLink}</td>
+                <td class="mono" style="font-weight:400;color:var(--text-muted)">${g.prediction || '—'}</td>
+                <td>${confHtml(g.confidence)}</td>
+                <td>${doorsHtml}</td>
+                <td>${summary}</td>
             </tr>`;
         }).join('');
     }
@@ -621,18 +838,18 @@
             ? `${rows.length} morada${rows.length !== 1 ? 's' : ''} para verificar`
             : 'Nenhuma por agora';
         if (!rows.length) {
-            tbody.innerHTML = `<tr class="empty-row"><td colspan="6">Sem erros registados.</td></tr>`;
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="7">Sem erros registados.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
-            return `<tr class="${rowClass(r)}">
-                ${idxTd(idx)}
+            return `<tr class="${rowClass(r)}">${idxTd(idx)}
                 <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
                 <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
                 <td>${mapHtml(r)}</td>
+                <td>${coordsHtml(r)}</td>
             </tr>`;
         }).join('');
     }
@@ -640,16 +857,10 @@
     // ── Status badge ──────────────────────────────────────────────────────────
     function setStatusBadge(s) {
         const el  = document.getElementById('statusBadge');
-        const map = {
-            idle:    ['sb-idle',    'Inativo'   ],
-            running: ['sb-running', 'A correr'  ],
-            done:    ['sb-done',    'Concluido' ],
-            error:   ['sb-error',   'Erro'      ],
-        };
+        const map = { idle: ['sb-idle','Inativo'], running: ['sb-running','A correr'], done: ['sb-done','Concluido'], error: ['sb-error','Erro'] };
         el.className   = 'status-badge ' + (map[s]?.[0] ?? 'sb-idle');
         el.textContent = map[s]?.[1] ?? 'Inativo';
     }
 </script>
-
 </body>
 </html>
