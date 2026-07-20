@@ -1,3 +1,3 @@
 @echo off
-powershell -ExecutionPolicy Bypass -File "C:\Users\mafapereira\OneDrive - NOS SGPS, S.A\Documents\door_number_detector_new\stop.ps1"
+powershell -ExecutionPolicy Bypass -File "%~dp0stop.ps1"
 pause

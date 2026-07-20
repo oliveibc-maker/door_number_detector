@@ -30,8 +30,11 @@ All dependencies are installed via `pip` from `requirements.txt`. No external sy
 ### Step 1: Create and activate the virtual environment
 
 ~~~bash
-# Create venv with Python 3.10
-python3.10 -m venv .venv310
+# If Python 3.10 is your default python:
+python -m venv .venv310
+
+# Or, using the Python Launcher (recommended if multiple versions are installed):
+py -3.10 -m venv .venv310
 
 # Activate — Linux/macOS
 source .venv310/bin/activate
@@ -48,6 +51,11 @@ If PowerShell blocks script execution:
 ~~~powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv310\Scripts\Activate.ps1
+~~~
+
+~~~bash
+#check the version of yout python (important - must be <= 3.10)
+python --version
 ~~~
 
 ### Step 2: Install dependencies
@@ -85,12 +93,20 @@ Get a Google Street View API key from: https://developers.google.com/maps/docume
 
 ### Option A: Windows — use the provided scripts (recommended)
 
-Double-click or run from CMD:
+Double-click:
 
 ~~~
 start.bat   — starts the web server
 stop.bat    — stops the web server
 ~~~
+
+Or run from CMD:
+
+~~~
+.\start.bat   — starts the web server
+.\stop.bat    — stops the web server
+~~~
+
 
 `start.bat` reads `RUN_IN_BACKGROUND` from `.env`:
 - `False` → runs in the current window (logs visible)

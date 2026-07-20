@@ -1,4 +1,4 @@
-﻿$root = "C:\Users\mafapereira\OneDrive - NOS SGPS, S.A\Documents\door_number_detector_new"
+﻿$root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $python = "$root\.venv310\Scripts\python.exe"
 Set-Location $root
 
