@@ -1,4 +1,4 @@
-﻿$root = "C:\Users\mafapereira\OneDrive - NOS SGPS, S.A\Documents\door_number_detector_new"
+﻿$root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $pidFile = "$root\server.pid"
 
 Write-Host "Stopping Door Number Detector..." -ForegroundColor Cyan
