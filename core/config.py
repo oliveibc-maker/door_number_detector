@@ -75,15 +75,7 @@ class Config:
     def src_db_password(self):
         return os.getenv("SRC_DB_PASSWORD", "")
 
-    # ── OCR / detection ────────────────────────────────────────────────────────
-    @property
-    def tesseract_path(self):
-        return os.getenv("TESSERACT_PATH")
-
-    @property
-    def ocr_language(self):
-        return os.getenv("OCR_LANGUAGE", "por+eng")
-
+    # ── Detection ──────────────────────────────────────────────────────────────
     @property
     def confidence_threshold(self):
         return int(os.getenv("CONFIDENCE_THRESHOLD", "70"))
@@ -95,7 +87,7 @@ class Config:
     @property
     def debug(self):
         return os.getenv("DEBUG", "False").lower() == "true"
-    
+
     @property
     def https_proxy(self):
         return os.getenv("HTTPS_PROXY", "")

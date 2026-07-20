@@ -18,8 +18,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from paddleocr import PaddleOCR
 
 from core.config import Config
 from core.database import DatabaseManager
@@ -65,11 +65,10 @@ _BLOCKLIST: set[str] = {
 
 
 class DoorNumberDetector:
-    """Detects door numbers using Google Street View images and OCR."""
+    """Detects door numbers using Google Street View images and PaddleOCR."""
 
     def __init__(self, env_path=".env"):
         self.config = Config(env_path)
-        self._configure_tesseract()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.debug_root = Path("ocr_debug")
         self.debug_root.mkdir(parents=True, exist_ok=True)
@@ -83,44 +82,16 @@ class DoorNumberDetector:
             https_proxy=self.config.https_proxy,
         )
 
-        self._ocr_engine = os.getenv("OCR_ENGINE", "easyocr").lower()
-
-        if self._ocr_engine == "paddleocr":
-            try:
-                from paddleocr import PaddleOCR
-                logger.info("Loading PaddleOCR model (first run downloads models)...")
-                self._paddle_reader = PaddleOCR(
-                    lang="en",
-                    use_angle_cls=True,
-                    use_gpu=False,
-                    show_log=False,
-                    det_db_thresh=0.2,
-                    det_db_box_thresh=0.4,
-                )
-                logger.info("PaddleOCR initialized")
-            except ImportError as exc:
-                raise ImportError(
-                    "PaddleOCR is not installed. Run: pip install paddleocr"
-                ) from exc
-        else:
-            import easyocr
-            logger.info("Loading EasyOCR model (first run downloads ~100MB)...")
-            self._ocr_reader = easyocr.Reader(["en"], gpu=False)
-            logger.info("EasyOCR initialized")
-
-        logger.info(f"Door Number Detector initialized (OCR engine: {self._ocr_engine})")
-
-    def _configure_tesseract(self):
-        tesseract_path = self.config.tesseract_path
-        if not tesseract_path:
-            return
-        if os.path.isdir(tesseract_path):
-            tesseract_path = os.path.join(tesseract_path, "tesseract.exe")
-        pytesseract.pytesseract.tesseract_cmd = tesseract_path
-        if not os.path.exists(tesseract_path):
-            logger.warning(f"Tesseract executable not found at {tesseract_path}")
-        else:
-            logger.info(f"Using Tesseract executable: {tesseract_path}")
+        logger.info("Loading PaddleOCR model (first run downloads models)...")
+        self._paddle_reader = PaddleOCR(
+            lang="en",
+            use_angle_cls=True,
+            use_gpu=False,
+            show_log=False,
+            det_db_thresh=0.2,
+            det_db_box_thresh=0.4,
+        )
+        logger.info("Door Number Detector initialized (OCR engine: PaddleOCR)")
 
     def _save_debug_image(self, image, name, directory: Path | None = None):
         target_dir = directory if directory is not None else self.debug_dir
@@ -149,6 +120,12 @@ class DoorNumberDetector:
 
     @staticmethod
     def _is_suspicious_short(num: str) -> bool:
+        """True if the candidate is a short fragment likely from a year watermark.
+
+        Covers:
+          - Two-digit year fragments: 20 (prefix), 21–26 (recent year suffixes)
+          - e.g. '20', '24', '25', '23', '22', '21', '26'
+        """
         if re.fullmatch(r"2[0-6]", num):
             return True
         return False
@@ -207,28 +184,8 @@ class DoorNumberDetector:
 
         all_candidates: list[tuple[str, float]] = []
 
-        logger.info(f"OCR [{self._ocr_engine}]: full image 2x upscale...")
+        logger.info("OCR [PaddleOCR]: full image 2x upscale...")
         full_2x = self._upscale(cv_img, scale=2)
-
-        def _run_easyocr(scan_img: np.ndarray, tag: str) -> list:
-            results = self._ocr_reader.readtext(
-                scan_img,
-                paragraph=False,
-                detail=1,
-                min_size=5,
-                text_threshold=0.2,
-                low_text=0.2,
-                link_threshold=0.2,
-                canvas_size=2560,
-                mag_ratio=2.0,
-            )
-            filtered = []
-            for bbox, text, conf in results:
-                for num in self._parse_ocr_text(text):
-                    all_candidates.append((num, conf))
-                    logger.info(f"EasyOCR [{tag}] '{num}' <- '{text}' ({conf * 100:.0f}%)")
-                filtered.append((bbox, text, conf))
-            return filtered
 
         def _run_paddleocr(scan_img: np.ndarray, tag: str) -> list:
             ocr_result = self._paddle_reader.ocr(scan_img)
@@ -249,10 +206,7 @@ class DoorNumberDetector:
                 normalized_results.append((bbox, text, conf))
             return normalized_results
 
-        if self._ocr_engine == "paddleocr":
-            _run_paddleocr(full_2x, "full_2x")
-        else:
-            _run_easyocr(full_2x, "full_2x")
+        _run_paddleocr(full_2x, "full_2x")
 
         if not all_candidates:
             logger.info("No candidates found")
@@ -355,17 +309,10 @@ class DoorNumberDetector:
         sweep: list | None = None,
         cancel_event: threading.Event | None = None,
     ) -> list[dict]:
-        """Run the FOV sweep for a given position.
-
-        Raises NoImageryAvailable if Street View confirms no coverage for this
-        coordinate (detected via metadata ZERO_RESULTS or the grey placeholder).
-        Once detected, the entire sweep is aborted immediately — all subsequent
-        images for the same coordinate would be identical placeholders.
-        """
         fov_sweep = sweep if sweep is not None else self._FOV_SWEEP
         all_image_candidates: list[dict] = []
         done        = False
-        _no_imagery = False  # set True the moment a no-imagery response is detected
+        _no_imagery = False
 
         for fov_try, fov_heading_offsets, fov_pitch_values in fov_sweep:
             if done:
@@ -397,7 +344,6 @@ class DoorNumberDetector:
                         f"[{pass_label}] Trying FOV={fov_try} offset={offset} pitch={pitch_try}"
                     )
 
-                    # ── Fetch — catch no-imagery placeholder ──────────────────
                     try:
                         candidate_image = self.street_view.get_image(
                             latitude,
@@ -451,7 +397,6 @@ class DoorNumberDetector:
                         done = True
                         break
 
-        # Propagate no-imagery to the caller so it can record the observation.
         if _no_imagery:
             raise NoImageryAvailable(
                 f"No Street View imagery available for ({latitude}, {longitude})"
@@ -511,7 +456,6 @@ class DoorNumberDetector:
                             f"(road_heading from API: {road_heading})"
                         )
                     except NoImageryAvailable:
-                        # Metadata already confirmed no pano — skip immediately.
                         raise
                     except Exception as exc:
                         logger.warning(f"Could not compute heading: {exc}. Using 0°.")
@@ -701,7 +645,6 @@ class DoorNumberDetector:
             return result
 
         except NoImageryAvailable:
-            # ── No Street View coverage — record and return cleanly ────────────
             logger.warning(
                 f"No Street View imagery available for ({latitude}, {longitude}) — "
                 f"skipping OCR and recording observation."

@@ -13,7 +13,7 @@
     "total_api_calls": 2572,
     "avg_image_calls_per_detection": 61.73,
     "avg_meta_calls_per_detection": 1.0,
-    "currency": "\u20ac",
+    "currency": "€",
     "cost_per_image_call": 0.0064,
     "total_cost": 16.1984,
     "avg_cost_per_detection": 0.3951
