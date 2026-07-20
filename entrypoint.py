@@ -2,6 +2,8 @@
 
 import csv
 import re
+import time
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
@@ -11,6 +13,7 @@ import pyodbc
 
 from core.config import Config
 from core.detector import DoorNumberDetector
+from core.metrics import RunMetrics
 
 import sys
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -25,9 +28,9 @@ _OUTPUT_COLUMNS = [
     "CONFIDENCE",
     "PREDICTION_FOUND",
     "MATCH",
+    "OBSERVATION",
 ]
 
-# Valid SQL Server columns to filter on
 _FILTER_COLUMNS = {
     "localidade": "NOME_LOCALIDADE",
     "freguesia":  "NOME_FREGUESIA",
@@ -35,9 +38,11 @@ _FILTER_COLUMNS = {
     "rua":        "ID_RUA",
 }
 
+_NO_IMAGERY_TOKEN = "NO_IMAGERY"
+_NO_IMAGERY_OBS   = "No Street View imagery available"
+
 
 def _normalize(s: str) -> str:
-    """Uppercase and strip all spaces for loose comparison."""
     return re.sub(r"\s+", "", s.strip().upper())
 
 
@@ -54,7 +59,6 @@ def _append_row_to_csv(output_path: Path, row_data: list) -> None:
 
 
 def _load_already_processed(existing_csv: Path) -> set[tuple[float, float]]:
-    """Return a set of (lat, lon) already present in an existing predictions CSV."""
     processed = set()
     with open(existing_csv, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f, delimiter=";")
@@ -73,7 +77,6 @@ def _query_sqlserver(
     filter_value: str,
     config: Config,
 ) -> pd.DataFrame:
-    """Query SGM.SGM_PORTA filtered by the chosen geographic level."""
     if filter_by not in _FILTER_COLUMNS:
         raise ValueError(
             f"filter_by must be one of {list(_FILTER_COLUMNS.keys())}, got '{filter_by}'"
@@ -128,7 +131,7 @@ def _query_sqlserver(
     return df
 
 
-# ── Core detection loop (shared by both sources) ───────────────────────────────
+# ── Core detection loop ────────────────────────────────────────────────────────
 
 import logging
 logger = logging.getLogger(__name__)
@@ -139,6 +142,8 @@ def _run_detection_on_df(
     already_processed: set[tuple[float, float]],
     existing_csv: Optional[Path] = None,
     detector_instance=None,
+    cancel_event: Optional[threading.Event] = None,
+    metrics: Optional[RunMetrics] = None,   # ← pass from app.py for live updates
 ) -> Path:
     df_todo = df[
         ~df.apply(
@@ -172,12 +177,24 @@ def _run_detection_on_df(
     _owns_detector = detector_instance is None
     detector = detector_instance if detector_instance is not None else DoorNumberDetector()
 
-    total   = len(df_todo)
-    n_match = 0
-    n_error = 0
+    # If no external metrics instance was provided (e.g. CLI run), create a local one.
+    _owns_metrics = metrics is None
+    if _owns_metrics:
+        metrics = RunMetrics()
+
+    total    = len(df_todo)
+    n_match  = 0
+    n_error  = 0
+    n_no_img = 0
+    i        = 0
 
     try:
         for i, (_, row) in enumerate(df_todo.iterrows(), 1):
+
+            if cancel_event is not None and cancel_event.is_set():
+                print(f"[{i}/{total}] Batch cancelled by user — stopping cleanly.")
+                break
+
             nome      = str(row.get("NOME_COMPLETO_PORTA", "") or "").strip()
             latitude  = row.get("LATITUDE")
             longitude = row.get("LONGITUDE")
@@ -185,15 +202,41 @@ def _run_detection_on_df(
             prediction       = None
             confidence       = 0
             prediction_found = "NO"
+            observation      = ""
 
             if pd.isna(latitude) or pd.isna(longitude):
                 logger.warning(f"[{i}/{total}] Skipping row with null coordinates.")
             else:
+                detector.street_view.reset_call_counts()
+                t0 = time.process_time()
+
+                _result_success = False
+                _is_no_imagery  = False
+
                 try:
-                    result           = detector.detect_door_number(float(latitude), float(longitude))
-                    prediction_found = "YES" if result.get("success", False) else "NO"
-                    prediction       = result.get("door_number") if prediction_found == "YES" else None
-                    confidence       = result.get("confidence", 0)
+                    result = detector.detect_door_number(
+                        float(latitude), float(longitude),
+                        cancel_event=cancel_event,
+                    )
+
+                    if cancel_event is not None and cancel_event.is_set():
+                        print(f"[{i}/{total}] Cancelled mid-detection — stopping.")
+                        break
+
+                    observation    = result.get("observation", "")
+                    _is_no_imagery = (observation == _NO_IMAGERY_OBS)
+
+                    if _is_no_imagery:
+                        prediction_found = _NO_IMAGERY_TOKEN
+                        prediction       = None
+                        confidence       = 0
+                        n_no_img        += 1
+                    else:
+                        prediction_found = "YES" if result.get("success", False) else "NO"
+                        prediction       = result.get("door_number") if prediction_found == "YES" else None
+                        confidence       = result.get("confidence", 0)
+                        _result_success  = result.get("success", False)
+
                 except Exception as exc:
                     n_error += 1
                     logger.error(
@@ -201,12 +244,28 @@ def _run_detection_on_df(
                         f"at ({latitude}, {longitude}): {exc}",
                         exc_info=True,
                     )
-                    # Write a failed row and continue — do NOT let it kill the loop
                     _append_row_to_csv(
                         output_path,
-                        [latitude, longitude, nome, None, 0, "NO", "NO"],
+                        [latitude, longitude, nome, None, 0, "NO", "NO", ""],
+                    )
+                    _img_e, _meta_e = detector.street_view.get_call_counts()
+                    metrics.record(
+                        elapsed_s=time.process_time() - t0,
+                        image_calls=_img_e,
+                        metadata_calls=_meta_e,
+                        success=False,
+                        no_imagery=False,
                     )
                     continue
+
+                _img, _meta = detector.street_view.get_call_counts()
+                metrics.record(
+                    elapsed_s=time.process_time() - t0,
+                    image_calls=_img,
+                    metadata_calls=_meta,
+                    success=_result_success,
+                    no_imagery=_is_no_imagery,
+                )
 
             match = "YES" if (
                 prediction is not None
@@ -218,28 +277,49 @@ def _run_detection_on_df(
 
             _append_row_to_csv(
                 output_path,
-                [latitude, longitude, nome, prediction, confidence, prediction_found, match],
+                [latitude, longitude, nome, prediction, confidence, prediction_found, match, observation],
             )
 
             status = (
-                "✓ MATCH"    if match == "YES" else
-                "✗ WRONG"    if prediction_found == "YES" else
+                "✓ MATCH"        if match == "YES" else
+                "📷 NO IMAGERY"  if prediction_found == _NO_IMAGERY_TOKEN else
+                "✗ WRONG"        if prediction_found == "YES" else
                 "? NOT FOUND"
             )
             print(f"[{i}/{total}] expected={nome!r} predicted={prediction!r} ({confidence}%) {status}")
 
     except Exception as fatal:
-        # Something outside the per-row try (e.g. CSV write failure) — log and re-raise
         logger.critical(f"Fatal error at row {i}/{total}: {fatal}", exc_info=True)
         raise
     finally:
         if _owns_detector:
             detector.close()
 
-    print(f"\nDone: {n_match}/{total} matched ({100 * n_match / total:.1f}%) | {n_error} error(s)")
-    print(f"Saved to {output_path}")
-    return output_path
+    processed = i
+    cancelled = cancel_event is not None and cancel_event.is_set()
 
+    if cancelled:
+        print(f"\nCancelled after {processed} row(s). Partial results saved to {output_path}")
+    else:
+        addressable = total - n_no_img
+        print(
+            f"\nDone: {n_match}/{total} matched "
+            f"({100 * n_match / total:.1f}%) | "
+            f"{n_no_img} sem cobertura GSV | "
+            f"{n_error} error(s)"
+        )
+        if addressable:
+            print(f"Effective accuracy (excl. no imagery): {100 * n_match / addressable:.1f}%")
+        print(f"Saved to {output_path}")
+
+    # Always print the summary; only save JSON when we own the instance (CLI runs).
+    metrics.print_summary()
+    if _owns_metrics:
+        metrics_path = output_path.with_suffix(".metrics.json")
+        metrics.save_json(metrics_path)
+        print(f"Metrics saved to {metrics_path.name}")
+
+    return output_path
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -250,8 +330,9 @@ def run_from_sqlserver(
     output_path: str | Path,
     existing_csv: str | Path | None = None,
     detector_instance=None,
+    cancel_event: Optional[threading.Event] = None,
+    metrics: Optional[RunMetrics] = None,
 ) -> Path:
-    """Fetch rows from GEO_DB.SGM.SGM_PORTA and run detection."""
     output_path = Path(output_path).with_suffix(".csv")
     config      = Config()
 
@@ -268,6 +349,8 @@ def run_from_sqlserver(
     return _run_detection_on_df(
         df, output_path, already_processed, existing_csv,
         detector_instance=detector_instance,
+        cancel_event=cancel_event,
+        metrics=metrics,
     )
 
 
@@ -276,8 +359,9 @@ def run_batch_predictions(
     output_path: str | Path,
     existing_csv: str | Path | None = None,
     detector_instance=None,
+    cancel_event: Optional[threading.Event] = None,
+    metrics: Optional[RunMetrics] = None,
 ) -> Path:
-    """Load coordinates from an Excel workbook and run detection."""
     input_path  = Path(input_path)
     output_path = Path(output_path).with_suffix(".csv")
 
@@ -301,6 +385,8 @@ def run_batch_predictions(
     return _run_detection_on_df(
         df, output_path, already_processed, existing_csv,
         detector_instance=detector_instance,
+        cancel_event=cancel_event,
+        metrics=metrics,
     )
 
 
@@ -345,6 +431,7 @@ def main():
     print(f"Longitude:   {result['longitude']}")
     print(f"Door number: {result.get('door_number', 'N/A')}")
     print(f"Confidence:  {result.get('confidence', 0)}%")
+    print(f"Observation: {result.get('observation', '')}")
     print(f"Status:      {'✓ Success' if result['success'] else '✗ Error'}")
     if not result["success"]:
         print(f"Error:       {result.get('error', 'Unknown')}")

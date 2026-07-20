@@ -11,6 +11,7 @@ import logging
 import math
 import re
 import sys
+import threading
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +23,7 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 from core.config import Config
 from core.database import DatabaseManager
-from core.google_street_view import StreetViewFetcher
+from core.google_street_view import StreetViewFetcher, NoImageryAvailable
 
 
 # ── UTF-8 safe logging (fixes cp1252 crash on Windows) ────────────────────────
@@ -49,19 +50,17 @@ logger = _build_logger()
 
 # ── Door number patterns ───────────────────────────────────────────────────────
 
-# Priority 1 — Keyword-based Portuguese addressing.
 _KEYWORD_RE = re.compile(
     r"\b(LOTE|LOT|SECTOR|SEC|BLOCO|BL|APARTAMENTO|APT|FRACCAO|FRACAO)\s*(\d{1,4})\b",
     re.IGNORECASE,
 )
 
-# Priority 2 — Alphanumeric door numbers.
 _DOOR_NUMBER_RE = re.compile(r"[A-Za-z]?\d{1,4}[A-Za-z]?")
 
-# ── Google watermark / false-positive blocklist ────────────────────────────────
 _BLOCKLIST: set[str] = {
     "2024G", "2023G", "2022G", "2025G", "2026G",
     "G000", "G001", "G002", "G003", "G004",
+    "2024", "2025",
 }
 
 
@@ -84,7 +83,6 @@ class DoorNumberDetector:
             https_proxy=self.config.https_proxy,
         )
 
-        # ── OCR engine selection ───────────────────────────────────────────────
         self._ocr_engine = os.getenv("OCR_ENGINE", "easyocr").lower()
 
         if self._ocr_engine == "paddleocr":
@@ -134,22 +132,15 @@ class DoorNumberDetector:
         return path
 
     def _upscale(self, image: np.ndarray, scale: int = 3) -> np.ndarray:
-        """Bicubic upscale — makes small distant text readable."""
         h, w = image.shape[:2]
         return cv2.resize(image, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
 
     @staticmethod
     def _is_leading_zero(num: str) -> bool:
-        """True only when the digit portion has a spurious leading zero."""
         return bool(re.match(r"0\d", num))
 
     @staticmethod
     def _is_year_like(num: str) -> bool:
-        """Tier 1 suspicion — looks like a full year or copyright year fragment.
-
-        e.g. 2024, 2025, 202, 1999
-        These are NEVER preferred — always search for something better.
-        """
         return bool(
             re.fullmatch(r"202", num)      or
             re.fullmatch(r"20\d{2}", num)  or
@@ -158,20 +149,14 @@ class DoorNumberDetector:
 
     @staticmethod
     def _is_suspicious_short(num: str) -> bool:
-        """Tier 2 suspicion — two-digit fragment that could be part of a year watermark.
-
-        e.g. '20', '24', '25', '23', '22', '21', '26'
-        These trigger a full search, but are preferred over Tier 1 year-like
-        candidates as a last resort — because '20' could be a real door number.
-        """
-        return bool(re.fullmatch(r"2[0-6]", num))
+        if re.fullmatch(r"2[0-6]", num):
+            return True
+        return False
 
     def _is_bad_candidate(self, num: str) -> bool:
-        """True if candidate is suspicious at any tier (Tier 1 OR Tier 2)."""
         return self._is_year_like(num) or self._is_suspicious_short(num)
 
     def _has_non_year_alternative(self, candidates: list[dict]) -> bool:
-        """True if any candidate is fully clean (non-bad, non-blocklisted, above threshold)."""
         return any(
             c["number"]
             and not self._is_bad_candidate(c["number"])
@@ -181,10 +166,6 @@ class DoorNumberDetector:
         )
 
     def _needs_more_search(self, candidates: list[dict]) -> bool:
-        """True if we should keep searching:
-        - nothing confident found yet, OR
-        - best is bad (any tier) with no clean alternative above threshold
-        """
         if not self._has_any_confident_candidate(candidates):
             return True
         _tmp_best = max(
@@ -200,10 +181,8 @@ class DoorNumberDetector:
         )
 
     def _parse_ocr_text(self, text: str) -> list[str]:
-        """Extract door-number candidates from a single OCR text fragment."""
         upper = text.strip().upper()
 
-        # 1. Keyword patterns take priority
         keyword_hits = _KEYWORD_RE.findall(upper)
         if keyword_hits:
             combined = "-".join(f"{kw}{num}" for kw, num in keyword_hits)
@@ -212,7 +191,6 @@ class DoorNumberDetector:
                 return []
             return [combined]
 
-        # 2. Alphanumeric fallback
         results = []
         for num in _DOOR_NUMBER_RE.findall(upper):
             if self._is_leading_zero(num):
@@ -303,7 +281,6 @@ class DoorNumberDetector:
         )
         return best_number, best_confidence_pct
 
-    # ── Road offset helper ─────────────────────────────────────────────────────
     @staticmethod
     def _road_offset(
         lat: float, lng: float, base_heading: float, distance_m: float
@@ -313,22 +290,18 @@ class DoorNumberDetector:
         dlng = distance_m * math.sin(bearing) / (111_000 * math.cos(math.radians(lat)))
         return lat + dlat, lng + dlng
 
-    # ── FOV sweep — normal (offsets up to ±30°) ────────────────────────────────
     _FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
-        # (  20,   [0, -5, 5, -10, 10, -20, 20, -30, 30],                    [0, -5, 5, -10, 10, -15, 15]  ),
-        (  10,   [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]  ),
+        (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
     ]
 
-    # ── Early-exit thresholds ──────────────────────────────────────────────────
     _EARLY_EXIT_MIN_DIGITS: int = 4
     _EARLY_EXIT_MIN_AGREE:  int = 1
 
     def _is_suspicious_number(self, num: str) -> bool:
-        """All numbers need corroboration — no length-based free pass."""
         return True
 
     def _no_early_stop_number(self, num: str) -> bool:
-        if num == "202":
+        if num in ("20", "2", "24", "25", "202"):
             return True
         if re.fullmatch(r"20\d{2}", num):
             return True
@@ -366,7 +339,6 @@ class DoorNumberDetector:
         return agreeing >= self._EARLY_EXIT_MIN_AGREE
 
     def _has_any_confident_candidate(self, candidates: list[dict]) -> bool:
-        """True if at least one candidate clears the confidence threshold."""
         return any(
             c["number"] and c["confidence"] >= self.config.confidence_threshold
             for c in candidates
@@ -381,14 +353,25 @@ class DoorNumberDetector:
         pass_label: str = "center",
         pitch_override: int | None = None,
         sweep: list | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> list[dict]:
-        """Run the FOV sweep for a given position."""
+        """Run the FOV sweep for a given position.
+
+        Raises NoImageryAvailable if Street View confirms no coverage for this
+        coordinate (detected via metadata ZERO_RESULTS or the grey placeholder).
+        Once detected, the entire sweep is aborted immediately — all subsequent
+        images for the same coordinate would be identical placeholders.
+        """
         fov_sweep = sweep if sweep is not None else self._FOV_SWEEP
         all_image_candidates: list[dict] = []
-        done = False
+        done        = False
+        _no_imagery = False  # set True the moment a no-imagery response is detected
 
         for fov_try, fov_heading_offsets, fov_pitch_values in fov_sweep:
             if done:
+                break
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(f"[{pass_label}] Cancelled — aborting FOV sweep.")
                 break
 
             pitch_values = [pitch_override] if pitch_override is not None else fov_pitch_values
@@ -396,23 +379,47 @@ class DoorNumberDetector:
             for pitch_try in pitch_values:
                 if done:
                     break
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.info(f"[{pass_label}] Cancelled — aborting pitch loop.")
+                    done = True
+                    break
 
                 for offset in fov_heading_offsets:
+                    if cancel_event is not None and cancel_event.is_set():
+                        logger.info(
+                            f"[{pass_label}] Cancelled at offset={offset} — "
+                            f"aborting heading sweep."
+                        )
+                        done = True
+                        break
+
                     logger.info(
                         f"[{pass_label}] Trying FOV={fov_try} offset={offset} pitch={pitch_try}"
                     )
-                    candidate_image = self.street_view.get_image(
-                        latitude,
-                        longitude,
-                        heading=heading,
-                        heading_offset=offset,
-                        pitch=pitch_try,
-                        fov=fov_try,
-                    )
+
+                    # ── Fetch — catch no-imagery placeholder ──────────────────
+                    try:
+                        candidate_image = self.street_view.get_image(
+                            latitude,
+                            longitude,
+                            heading=heading,
+                            heading_offset=offset,
+                            pitch=pitch_try,
+                            fov=fov_try,
+                        )
+                    except NoImageryAvailable:
+                        logger.warning(
+                            f"[{pass_label}] No Street View imagery for "
+                            f"({latitude}, {longitude}) — aborting sweep."
+                        )
+                        _no_imagery = True
+                        done = True
+                        break
 
                     if candidate_image is None:
                         logger.warning(
-                            f"[{pass_label}] No image returned for offset={offset} pitch={pitch_try}"
+                            f"[{pass_label}] No image returned for "
+                            f"offset={offset} pitch={pitch_try}"
                         )
                         continue
 
@@ -444,9 +451,23 @@ class DoorNumberDetector:
                         done = True
                         break
 
+        # Propagate no-imagery to the caller so it can record the observation.
+        if _no_imagery:
+            raise NoImageryAvailable(
+                f"No Street View imagery available for ({latitude}, {longitude})"
+            )
+
         return all_image_candidates
 
-    def detect_door_number(self, latitude, longitude, heading=None, pitch=None, image=None):
+    def detect_door_number(
+        self,
+        latitude,
+        longitude,
+        heading=None,
+        pitch=None,
+        image=None,
+        cancel_event: threading.Event | None = None,
+    ):
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
 
@@ -469,6 +490,11 @@ class DoorNumberDetector:
                     "pitch":      pitch,
                 })
             else:
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
+                    return {"success": False, "latitude": latitude, "longitude": longitude,
+                            "door_number": None, "confidence": 0, "error": "Cancelled"}
+
                 _base_heading = heading
                 road_heading: float | None = None
 
@@ -484,11 +510,13 @@ class DoorNumberDetector:
                             f"Heading pano->target: {_base_heading:.1f}° "
                             f"(road_heading from API: {road_heading})"
                         )
+                    except NoImageryAvailable:
+                        # Metadata already confirmed no pano — skip immediately.
+                        raise
                     except Exception as exc:
                         logger.warning(f"Could not compute heading: {exc}. Using 0°.")
                         _base_heading = 0
 
-                # ── Compute effective road heading ─────────────────────────────
                 effective_road_heading = road_heading if road_heading is not None else (_base_heading + 90) % 360
                 if road_heading is None:
                     logger.warning(
@@ -496,19 +524,6 @@ class DoorNumberDetector:
                         f"(perpendicular to camera)"
                     )
 
-                # ── Sweep direction ────────────────────────────────────────────
-                # angle_diff: clockwise rotation from road direction to camera-to-building direction.
-                #   [0°, 180°)  → building is to the RIGHT of the road → side_sign = -1
-                #   [180°, 360°) → building is to the LEFT  of the road → side_sign = +1
-                #
-                # wide_offsets_fwd  — sweep toward the road direction.
-                #   Used at the CENTER and LEFT positions (camera is level with or
-                #   behind the building; look forward along the facade).
-                #
-                # wide_offsets_back — sweep away from the road direction (opposite sign).
-                #   Used at the RIGHT position (camera is AHEAD of the building;
-                #   must look BACK to see the facade, not further forward which
-                #   crosses the road or misses the building entirely).
                 angle_diff = (_base_heading - effective_road_heading + 360) % 360
                 side_sign  = -1 if angle_diff < 180 else +1
 
@@ -516,93 +531,47 @@ class DoorNumberDetector:
                 wide_offsets_back = [-side_sign * o for o in [45, 60, 90]]
 
                 fov_sweep_wide_direct = [
-                    # (20, wide_offsets_fwd,  [0, -5, 5, -10, 10, -15, 15]),
                     (10, wide_offsets_fwd,  [0, -5, 5, -10, 10, -15, 15]),
                 ]
-                # Right position: camera is ahead (road-direction) of the building.
-                # Looking back (wide_offsets_back) reveals the facade.
                 fov_sweep_wide_right = [
-                    # (20, wide_offsets_back, [0, -5, 5, -10, 10, -15, 15]),
                     (10, wide_offsets_back, [0, -5, 5, -10, 10, -15, 15]),
                 ]
-                # Left position: camera is behind the building along the road.
-                # Looking forward (wide_offsets_fwd) reveals the facade.
                 fov_sweep_wide_left = [
                     (20, wide_offsets_fwd,  [0, -5, 5, -10, 10, -15, 15]),
                     (10, wide_offsets_fwd,  [0, -5, 5, -10, 10, -15, 15]),
                 ]
 
                 offset_m = self.config.road_offset_meters
-
-                # Precompute road offset positions
-                # Single heading along the road; +offset_m = ahead, -offset_m = behind
                 along_road_heading = (effective_road_heading - 90 + 360) % 360
                 r_lat, r_lng = self._road_offset(latitude, longitude, along_road_heading, +offset_m)
                 l_lat, l_lng = self._road_offset(latitude, longitude, along_road_heading, -offset_m)
 
-                # ── Pass 1: direct heading, normal offsets (±30°) ─────────────
+                # Pass 1 — direct heading, normal offsets (±30°)
                 logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
                 all_image_candidates = self._fetch_candidates(
                     latitude, longitude, _base_heading,
                     pass_label="direct",
                     pitch_override=pitch,
                     sweep=self._FOV_SWEEP,
+                    cancel_event=cancel_event,
                 )
 
-                # ── Pass 1b: wide sweep from center toward building facade ─────
-                if self._needs_more_search(all_image_candidates):
-                    logger.info(
-                        f"Pass 1b: direct wide sweep "
-                        f"({'RIGHT' if side_sign == 1 else 'LEFT'}, angle_diff={angle_diff:.1f}°)"
-                    )
-                    all_image_candidates.extend(self._fetch_candidates(
-                        latitude, longitude, _base_heading,
-                        pass_label="direct_wide",
-                        pitch_override=pitch,
-                        sweep=fov_sweep_wide_direct,
-                    ))
-
-                # # ── Pass 2: normal sweep from BOTH road-offset positions ───────
-                # # Run right and left together so the best candidate from either
-                # # side is available before committing to wide sweeps.
+                # Pass 1b — wide sweep toward building facade
                 # if self._needs_more_search(all_image_candidates):
-                #     logger.info(
-                #         f"Pass 2: normal sweep — "
-                #         f"RIGHT ({r_lat:.6f}, {r_lng:.6f}) + "
-                #         f"LEFT  ({l_lat:.6f}, {l_lng:.6f})"
-                #     )
-                #     all_image_candidates.extend(self._fetch_candidates(
-                #         r_lat, r_lng, _base_heading,
-                #         pass_label="right",
-                #         pitch_override=pitch,
-                #     ))
-                #     all_image_candidates.extend(self._fetch_candidates(
-                #         l_lat, l_lng, _base_heading,
-                #         pass_label="left",
-                #         pitch_override=pitch,
-                #     ))
-
-                # # ── Pass 3: wide sweep from BOTH road-offset positions ─────────
-                # # RIGHT: back-facing (camera is ahead of building, looks back).
-                # # LEFT:  forward-facing (camera is behind building, looks ahead).
-                # if self._needs_more_search(all_image_candidates):
-                #     logger.info(
-                #         f"Pass 3: wide sweep — "
-                #         f"RIGHT back-facing ({r_lat:.6f}, {r_lng:.6f}) + "
-                #         f"LEFT  fwd-facing  ({l_lat:.6f}, {l_lng:.6f})"
-                #     )
-                #     all_image_candidates.extend(self._fetch_candidates(
-                #         r_lat, r_lng, _base_heading,
-                #         pass_label="right_wide",
-                #         pitch_override=pitch,
-                #         sweep=fov_sweep_wide_right,
-                #     ))
-                #     all_image_candidates.extend(self._fetch_candidates(
-                #         l_lat, l_lng, _base_heading,
-                #         pass_label="left_wide",
-                #         pitch_override=pitch,
-                #         sweep=fov_sweep_wide_left,
-                #     ))
+                #     if cancel_event is not None and cancel_event.is_set():
+                #         logger.info("Cancelled before Pass 1b.")
+                #     else:
+                #         logger.info(
+                #             f"Pass 1b: direct wide sweep "
+                #             f"({'RIGHT' if side_sign == 1 else 'LEFT'}, angle_diff={angle_diff:.1f}°)"
+                #         )
+                #         all_image_candidates.extend(self._fetch_candidates(
+                #             latitude, longitude, _base_heading,
+                #             pass_label="direct_wide",
+                #             pitch_override=pitch,
+                #             sweep=fov_sweep_wide_direct,
+                #             cancel_event=cancel_event,
+                #         ))
 
             if not all_image_candidates:
                 logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
@@ -639,14 +608,6 @@ class DoorNumberDetector:
                 f"at heading_offset={heading} pitch={pitch}"
             )
 
-            # ── Two-tier bad candidate substitution (final selection) ──────────
-            #
-            # Priority order after all passes:
-            #   1. Clean candidate (non-bad, non-blocklisted, above threshold) ← best
-            #   2. Tier 2 fallback (suspicious short like '20', '24') ← acceptable
-            #      only when best is Tier 1 (year-like) and no clean exists
-            #   3. Keep original (Tier 1 year-like) ← last resort
-            #
             if door_number and self._is_bad_candidate(door_number):
                 sorted_candidates = sorted(
                     all_image_candidates,
@@ -654,7 +615,6 @@ class DoorNumberDetector:
                     reverse=True,
                 )
 
-                # Step 1: look for a fully clean candidate above threshold
                 clean_alternative = next(
                     (
                         c for c in sorted_candidates
@@ -679,9 +639,6 @@ class DoorNumberDetector:
                     pitch       = clean_alternative["pitch"]
 
                 elif self._is_year_like(door_number):
-                    # Step 2: best is Tier 1 (year-like) — accept a Tier 2
-                    # (suspicious short like '20') as a fallback. It may be a
-                    # real door number and is less suspicious than a full year.
                     tier2_alternative = next(
                         (
                             c for c in sorted_candidates
@@ -711,8 +668,6 @@ class DoorNumberDetector:
                             f"Tier 1 '{door_number}'"
                         )
                 else:
-                    # Best is already Tier 2 (suspicious short) and no clean
-                    # candidate exists — keep it, it may be a real door number.
                     logger.info(
                         f"Best is Tier 2 suspicious short '{door_number}' "
                         f"with no clean alternative — keeping it"
@@ -727,6 +682,7 @@ class DoorNumberDetector:
                 "confidence":  confidence,
                 "heading":     heading,
                 "pitch":       pitch,
+                "observation": "",
                 "timestamp":   datetime.now().isoformat(),
             }
 
@@ -741,6 +697,24 @@ class DoorNumberDetector:
             else:
                 logger.info(f"Result: {door_number} (confidence: {confidence}%)")
 
+            self.db.save_result(result)
+            return result
+
+        except NoImageryAvailable:
+            # ── No Street View coverage — record and return cleanly ────────────
+            logger.warning(
+                f"No Street View imagery available for ({latitude}, {longitude}) — "
+                f"skipping OCR and recording observation."
+            )
+            result = {
+                "success":     False,
+                "latitude":    latitude,
+                "longitude":   longitude,
+                "door_number": None,
+                "confidence":  0,
+                "observation": "No Street View imagery available",
+                "timestamp":   datetime.now().isoformat(),
+            }
             self.db.save_result(result)
             return result
 

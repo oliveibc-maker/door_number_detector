@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 import socket
 import sys
 import threading
@@ -13,15 +14,24 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from core.config import Config
 from core.detector import DoorNumberDetector
+from core.metrics import RunMetrics
 from entrypoint import run_batch_predictions, _query_sqlserver, _run_detection_on_df
 
 WEB_DIR   = Path(__file__).resolve().parent
 HTML_PATH = WEB_DIR / "templates" / "index.html"
 
-# ── Single global detector — loaded once, reused for all batches ───────────────
+# ── Single global detector ─────────────────────────────────────────────────────
 detector = DoorNumberDetector()
+_logger  = logging.getLogger("core.detector")
 
-_state = {"running": False, "csv_path": None, "total": 0, "error": None}
+_state = {
+    "running":      False,
+    "csv_path":     None,
+    "total":        0,
+    "error":        None,
+    "cancel_event": None,
+    "metrics":      None,   # RunMetrics instance — live, readable at any time
+}
 
 
 def _get_local_ip() -> str:
@@ -43,27 +53,66 @@ def _count_excel_rows(path: Path) -> int:
         return 0
 
 
-def _run_batch(excel_path: Path, csv_path: Path) -> None:
+def _new_cancel_event() -> threading.Event:
+    ev = threading.Event()
+    _state["cancel_event"] = ev
+    return ev
+
+
+def _save_metrics(metrics: RunMetrics, csv_path: Path) -> None:
+    """Persist metrics JSON alongside the output CSV."""
+    try:
+        metrics_path = csv_path.with_suffix(".metrics.json")
+        metrics.save_json(metrics_path)
+        _logger.info(f"[batch] Metrics saved to {metrics_path.name}")
+    except Exception as exc:
+        _logger.warning(f"[batch] Could not save metrics: {exc}")
+
+
+def _run_batch(excel_path: Path, csv_path: Path, cancel_event: threading.Event, metrics: RunMetrics) -> None:
+    _logger.info(f"[batch] Excel batch starting — {excel_path.name}")
     _state.update({"running": True, "error": None})
     try:
-        run_batch_predictions(excel_path, csv_path, detector_instance=detector)
+        run_batch_predictions(
+            excel_path, csv_path,
+            detector_instance=detector,
+            cancel_event=cancel_event,
+            metrics=metrics,
+        )
     except Exception as exc:
-        _state["error"] = str(exc)
+        _logger.exception(f"[batch] Excel batch failed: {exc}")
+        if not cancel_event.is_set():
+            _state["error"] = str(exc)
     finally:
         _state["running"] = False
+        _save_metrics(metrics, csv_path)
+        _logger.info("[batch] Excel batch finished.")
 
 
-def _run_sqlserver_batch(filter_by: str, filter_value: str, csv_path: Path) -> None:
+def _run_sqlserver_batch(
+    filter_by: str, filter_value: str, csv_path: Path,
+    cancel_event: threading.Event, metrics: RunMetrics,
+) -> None:
+    _logger.info(f"[batch] SQL batch starting — {filter_by}={filter_value!r}")
     _state.update({"running": True, "error": None})
     try:
         config = Config()
         df = _query_sqlserver(filter_by, filter_value, config)
         _state["total"] = len(df)
-        _run_detection_on_df(df, csv_path, set(), detector_instance=detector)
+        _run_detection_on_df(
+            df, csv_path, set(),
+            detector_instance=detector,
+            cancel_event=cancel_event,
+            metrics=metrics,
+        )
     except Exception as exc:
-        _state["error"] = str(exc)
+        _logger.exception(f"[batch] SQL batch failed: {exc}")
+        if not cancel_event.is_set():
+            _state["error"] = str(exc)
     finally:
         _state["running"] = False
+        _save_metrics(metrics, csv_path)
+        _logger.info("[batch] SQL batch finished.")
 
 
 def _read_csv() -> list:
@@ -87,12 +136,18 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/api/status":
             rows = _read_csv()
+
+            # Live metrics snapshot — safe to call from any thread at any time
+            m = _state.get("metrics")
+            metrics_summary = m.summary() if m else None
+
             self._send_json(200, {
                 "running":   _state["running"],
                 "total":     _state["total"],
                 "processed": len(rows),
                 "error":     _state["error"],
                 "rows":      rows,
+                "metrics":   metrics_summary,
             })
 
         elif parsed.path == "/api/results":
@@ -105,31 +160,66 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
-        if parsed.path == "/api/upload":
+        # ── Reset / cancel ────────────────────────────────────────────────────
+        if parsed.path == "/api/reset":
+            ev = _state.get("cancel_event")
+            if ev is not None:
+                ev.set()
+            _state.update({
+                "running":      False,
+                "csv_path":     None,
+                "total":        0,
+                "error":        None,
+                "cancel_event": None,
+                "metrics":      None,
+            })
+            self._send_json(200, {"status": "reset"})
+
+        # ── Excel upload ──────────────────────────────────────────────────────
+        elif parsed.path == "/api/upload":
             if _state["running"]:
                 self._send_json(409, {"error": "Pipeline already running."})
                 return
 
-            fname      = Path(params.get("filename", ["upload.xlsx"])[0]).name
-            length     = int(self.headers.get("Content-Length", "0"))
-            data       = self.rfile.read(length)
+            fname  = Path(params.get("filename", ["upload.xlsx"])[0]).name
+            length = int(self.headers.get("Content-Length", "0"))
+            data   = self.rfile.read(length)
+
+            if not data:
+                self._send_json(400, {"error": "No file data received (Content-Length=0)."})
+                return
+
             excel_path = ROOT_DIR / fname
-            excel_path.write_bytes(data)
+            try:
+                excel_path.write_bytes(data)
+                _logger.info(f"[upload] Saved {len(data):,} bytes → {excel_path}")
+            except Exception as exc:
+                _logger.error(f"[upload] Cannot save uploaded file: {exc}")
+                self._send_json(500, {"error": f"Cannot save file: {exc}"})
+                return
 
             ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
             csv_path = ROOT_DIR / f"predictions_{ts}.csv"
 
+            metrics = RunMetrics()   # ← fresh instance for this batch
             _state.update({
+                "running":  True,
+                "error":    None,
                 "total":    _count_excel_rows(excel_path),
                 "csv_path": str(csv_path),
+                "metrics":  metrics,
             })
 
+            cancel_event = _new_cancel_event()
             threading.Thread(
-                target=_run_batch, args=(excel_path, csv_path), daemon=True
+                target=_run_batch,
+                args=(excel_path, csv_path, cancel_event, metrics),
+                daemon=True,
             ).start()
 
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
+        # ── SQL Server batch ──────────────────────────────────────────────────
         elif parsed.path == "/api/run_sqlserver":
             if _state["running"]:
                 self._send_json(409, {"error": "Pipeline already running."})
@@ -151,20 +241,25 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             safe_name = filter_value.replace(" ", "_")
             csv_path  = ROOT_DIR / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
 
+            metrics = RunMetrics()   # ← fresh instance for this batch
             _state.update({
+                "running":  True,
+                "error":    None,
                 "total":    0,
                 "csv_path": str(csv_path),
-                "error":    None,
+                "metrics":  metrics,
             })
 
+            cancel_event = _new_cancel_event()
             threading.Thread(
                 target=_run_sqlserver_batch,
-                args=(filter_by, filter_value, csv_path),
+                args=(filter_by, filter_value, csv_path, cancel_event, metrics),
                 daemon=True,
             ).start()
 
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
+        # ── Single coordinate analysis ────────────────────────────────────────
         elif parsed.path == "/api/analyze":
             length = int(self.headers.get("Content-Length", "0"))
             body   = self.rfile.read(length).decode("utf-8")
@@ -208,7 +303,7 @@ def create_server(host="0.0.0.0", port=8080):
 
 
 def main():
-    server = create_server()
+    server   = create_server()
     local_ip = _get_local_ip()
     print("=" * 50)
     print("Door Number Detector — Web Server")
