@@ -1,0 +1,22 @@
+{
+  "summary": {
+    "n_total": 41,
+    "n_success": 25,
+    "n_no_imagery": 0,
+    "success_rate_pct": 61.0,
+    "total_time_s": 6773.61,
+    "avg_time_per_detection_s": 165.21,
+    "min_time_s": 29.28,
+    "max_time_s": 334.36,
+    "total_image_api_calls": 2531,
+    "total_metadata_api_calls": 41,
+    "total_api_calls": 2572,
+    "avg_image_calls_per_detection": 61.73,
+    "avg_meta_calls_per_detection": 1.0,
+    "currency": "\u20ac",
+    "cost_per_image_call": 0.0064,
+    "total_cost": 16.1984,
+    "avg_cost_per_detection": 0.3951
+  },
+  "records": []
+}

@@ -28,6 +28,8 @@
             --red-bg:        #fef2f2;
             --amber:         #92400e;
             --amber-bg:      #fffbeb;
+            --slate:         #475569;
+            --slate-bg:      #f8fafc;
         }
 
         body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; min-height: 100vh; }
@@ -127,17 +129,68 @@
         .sb-excel { background: #e0f2fe; color: #0369a1; }
         .sb-db    { background: #fae8ff; color: #7e22ce; }
 
-        .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
         .kpi {
             background: var(--surface); border: 1px solid var(--border);
             border-top: 3px solid var(--border); border-radius: 8px; padding: 15px 18px;
         }
-        .kpi.green  { border-top-color: #22c55e; } .kpi.green  .kpi-value { color: var(--green); }
-        .kpi.red    { border-top-color: #ef4444; } .kpi.red    .kpi-value { color: var(--red);   }
-        .kpi.amber  { border-top-color: #f59e0b; } .kpi.amber  .kpi-value { color: var(--amber); }
+        .kpi.green { border-top-color: #22c55e; } .kpi.green .kpi-value { color: var(--green); }
+        .kpi.red   { border-top-color: #ef4444; } .kpi.red   .kpi-value { color: var(--red);   }
+        .kpi.amber { border-top-color: #f59e0b; } .kpi.amber .kpi-value { color: var(--amber); }
+        .kpi.slate { border-top-color: #94a3b8; } .kpi.slate .kpi-value { color: var(--slate); }
         .kpi-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px; }
         .kpi-value { font-size: 30px; font-weight: 800; color: var(--text); line-height: 1; letter-spacing: -.04em; }
         .kpi-sub   { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
+
+        /* ── Live Metrics Panel ───────────────────────────────────────────── */
+        .metrics-panel {
+            background: #0f172a; border-radius: 8px; padding: 14px 18px;
+        }
+        .metrics-header {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+        }
+        .metrics-title {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .08em; color: #475569;
+        }
+        .live-pill {
+            display: flex; align-items: center; gap: 5px;
+            background: #1e293b; border-radius: 20px; padding: 2px 8px;
+        }
+        .live-dot {
+            width: 6px; height: 6px; border-radius: 50%; background: #475569;
+            flex-shrink: 0; transition: background .3s;
+        }
+        .live-dot.active { background: #22c55e; animation: pulse-dot 1.4s ease-in-out infinite; }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.25; }
+        }
+        .live-label { font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .06em; }
+        .live-label.active { color: #22c55e; }
+
+        .metrics-grid {
+            display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
+        }
+        .metric-item {
+            background: #1e293b; border-radius: 6px; padding: 11px 14px;
+        }
+        .metric-label {
+            font-size: 10px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: .06em; color: #475569; margin-bottom: 5px; line-height: 1.3;
+        }
+        .metric-value {
+            font-size: 20px; font-weight: 800; color: #f1f5f9; line-height: 1;
+            letter-spacing: -.03em;
+        }
+        .metric-value.highlight { color: #93c5fd; }
+        .metric-sub {
+            font-size: 10px; color: #334155; margin-top: 3px;
+        }
+        .metrics-note {
+            font-size: 10px; color: #1e293b; margin-top: 8px; text-align: right;
+        }
+        /* ── end metrics panel ───────────────────────────────────────────── */
 
         .acc {
             background: var(--primary); border-radius: 8px; padding: 18px 24px;
@@ -166,7 +219,7 @@
         }
         .vtab.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 
-        .tabs { display: flex; gap: 2px; }
+        .tabs { display: flex; gap: 2px; flex-wrap: wrap; }
         .tab  {
             padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer;
             font-family: var(--font); font-size: 12px; font-weight: 500;
@@ -193,12 +246,15 @@
         td { padding: 9px 14px; font-size: 13px; border-bottom: 1px solid var(--border-sub); vertical-align: middle; }
         tr:last-child td { border-bottom: none; }
 
-        tr.r-match    { background: var(--green-bg); }
-        tr.r-wrong    { background: var(--red-bg);   }
-        tr.r-notfound { background: var(--amber-bg); }
-        tr.r-match    td:first-child { border-left: 3px solid #22c55e; }
-        tr.r-wrong    td:first-child { border-left: 3px solid #ef4444; }
-        tr.r-notfound td:first-child { border-left: 3px solid #f59e0b; }
+        tr.r-match      { background: var(--green-bg); }
+        tr.r-wrong      { background: var(--red-bg);   }
+        tr.r-notfound   { background: var(--amber-bg); }
+        tr.r-no-imagery { background: var(--slate-bg); }
+
+        tr.r-match      td:first-child { border-left: 3px solid #22c55e; }
+        tr.r-wrong      td:first-child { border-left: 3px solid #ef4444; }
+        tr.r-notfound   td:first-child { border-left: 3px solid #f59e0b; }
+        tr.r-no-imagery td:first-child { border-left: 3px solid #94a3b8; }
 
         tr.r-multi-loc            { background: #faf5ff; }
         tr.r-multi-loc td:first-child { border-left: 3px solid #7c3aed; }
@@ -208,10 +264,11 @@
 
         .mono  { font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; font-weight: 600; font-size: 13px; }
         .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
-        .b-match    { background: #dcfce7; color: #166534; }
-        .b-wrong    { background: #fee2e2; color: #991b1b; }
-        .b-notfound { background: #fef3c7; color: #78350f; }
-        .b-multi    { background: #ede9fe; color: #5b21b6; }
+        .b-match      { background: #dcfce7; color: #166534; }
+        .b-wrong      { background: #fee2e2; color: #991b1b; }
+        .b-notfound   { background: #fef3c7; color: #78350f; }
+        .b-multi      { background: #ede9fe; color: #5b21b6; }
+        .b-no-imagery { background: #f1f5f9; color: #475569; }
 
         .conf-wrap { display: flex; align-items: center; gap: 8px; }
         .conf-bar  { width: 48px; height: 3px; background: #e2e8f0; border-radius: 2px; overflow: hidden; flex-shrink: 0; }
@@ -230,8 +287,16 @@
         .empty-row td { text-align: center; padding: 28px; color: var(--text-faint); font-size: 13px; }
         .idx { color: var(--text-faint); font-size: 11px; font-family: ui-monospace, monospace; }
 
+        @media (max-width: 1100px) {
+            .metrics-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 900px) {
+            .kpi-row      { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        }
         @media (max-width: 680px) {
-            .kpi-row { grid-template-columns: 1fr 1fr; }
+            .kpi-row      { grid-template-columns: 1fr 1fr; }
+            .metrics-grid { grid-template-columns: 1fr 1fr; }
             main { padding: 1rem; }
             .upload-card { padding: 28px 24px; }
         }
@@ -305,6 +370,10 @@
     <!-- ══ DASHBOARD ══ -->
     <div id="dashboard">
 
+        <!-- Error banner -->
+        <div id="errorBanner" style="display:none;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:13px 18px;color:#b91c1c;font-size:13px;font-weight:500;margin-bottom:16px;"></div>
+
+        <!-- Progress strip -->
         <div class="section">
             <div class="progress-strip">
                 <span class="source-badge" id="sourceBadge" style="display:none"></span>
@@ -315,6 +384,7 @@
             </div>
         </div>
 
+        <!-- KPI row -->
         <div class="section kpi-row">
             <div class="kpi">
                 <div class="kpi-label">Total Processado</div>
@@ -335,12 +405,58 @@
                 <div class="kpi-value" id="kNF">0</div>
                 <div class="kpi-sub" id="kNFSub">—</div>
             </div>
+            <div class="kpi slate">
+                <div class="kpi-label">Sem Cobertura GSV</div>
+                <div class="kpi-value" id="kNoImg">0</div>
+                <div class="kpi-sub" id="kNoImgSub">—</div>
+            </div>
         </div>
 
+        <!-- ══ LIVE METRICS PANEL ══ -->
+        <div class="section" id="metricsSection" style="display:none">
+            <div class="metrics-panel">
+                <div class="metrics-header">
+                    <span class="metrics-title">⚡ Métricas de Desempenho</span>
+                    <div class="live-pill">
+                        <div class="live-dot" id="liveDot"></div>
+                        <span class="live-label" id="liveLabel">Inativo</span>
+                    </div>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <div class="metric-label">Tempo Médio<br>por Porta</div>
+                        <div class="metric-value" id="mAvgTime">—</div>
+                        <div class="metric-sub" id="mTotalTime"></div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Min / Max<br>por Porta</div>
+                        <div class="metric-value" id="mMinMax" style="font-size:14px;padding-top:4px">—</div>
+                        <div class="metric-sub"></div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Chamadas API<br>Imagem / Porta</div>
+                        <div class="metric-value highlight" id="mAvgCalls">—</div>
+                        <div class="metric-sub" id="mTotalCalls"></div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Custo Total<br>Estimado</div>
+                        <div class="metric-value highlight" id="mTotalCost">—</div>
+                        <div class="metric-sub" id="mCostBasis"></div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Custo Médio<br>por Porta</div>
+                        <div class="metric-value highlight" id="mAvgCost">—</div>
+                        <div class="metric-sub"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Accuracy bar -->
         <div class="section">
             <div class="acc">
                 <div>
-                    <div class="acc-label">Precisao Efetiva — excl. moradas SN</div>
+                    <div class="acc-label">Precisao Efetiva — excl. SN e sem cobertura GSV</div>
                     <div class="acc-value" id="accValue">—</div>
                     <div class="acc-bar"><div class="acc-fill" id="accFill" style="width:0%"></div></div>
                 </div>
@@ -378,6 +494,7 @@
                                 <th>Previsto</th>
                                 <th>Confiança</th>
                                 <th>Estado</th>
+                                <th>Obs.</th>
                                 <th>Mapa</th>
                                 <th>Coordenadas</th>
                             </tr>
@@ -435,6 +552,7 @@
                                 <th>Previsto</th>
                                 <th>Confiança</th>
                                 <th>Estado</th>
+                                <th>Obs.</th>
                                 <th>Mapa</th>
                                 <th>Coordenadas</th>
                             </tr>
@@ -449,22 +567,23 @@
 </main>
 
 <script>
+    // ── State ─────────────────────────────────────────────────────────────────
     let excelFile    = null;
     let allRows      = [];
     let activeFilter = 'ALL';
     let pollTimer    = null;
-    let currentTab   = 'excel';
+    let currentTab   = localStorage.getItem('door_active_tab') || 'excel';
     let activeSource = 'excel';
     let currentView  = 'list';
     const POLL_MS    = 3000;
 
     function isDashboardVisible() {
-        // Check both inline style and computed style to handle CSS-hidden elements
-        const el = document.getElementById('dashboard');
-        return el.style.display === 'block' || getComputedStyle(el).display !== 'none';
+        return document.getElementById('dashboard').style.display === 'block';
     }
 
+    // ── Boot ──────────────────────────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', async () => {
+        _applyTabUI(currentTab);
         try {
             const data = await getStatus();
             if (data.running || (data.rows && data.rows.length > 0)) {
@@ -476,16 +595,21 @@
         } catch { /* server not ready yet */ }
     });
 
-    // ── Tab switching ─────────────────────────────────────────────────────────
-    function switchTab(tab) {
-        currentTab = tab;
+    function _applyTabUI(tab) {
         document.getElementById('tab-excel').classList.toggle('active', tab === 'excel');
         document.getElementById('tab-sql').classList.toggle('active',   tab === 'sql');
-        // Only swap forms if dashboard is not currently shown
-        if (!isDashboardVisible()) {
-            document.getElementById('excel-form').style.display = tab === 'excel' ? 'flex' : 'none';
-            document.getElementById('sql-form').style.display   = tab === 'sql'   ? 'flex' : 'none';
-        }
+        document.getElementById('excel-form').style.display = tab === 'excel' ? 'flex' : 'none';
+        document.getElementById('sql-form').style.display   = tab === 'sql'   ? 'flex' : 'none';
+    }
+
+    function switchTab(tab) {
+        currentTab = tab;
+        localStorage.setItem('door_active_tab', tab);
+        document.getElementById('tab-excel').classList.toggle('active', tab === 'excel');
+        document.getElementById('tab-sql').classList.toggle('active',   tab === 'sql');
+        if (isDashboardVisible()) { resetToForms(); return; }
+        document.getElementById('excel-form').style.display = tab === 'excel' ? 'flex' : 'none';
+        document.getElementById('sql-form').style.display   = tab === 'sql'   ? 'flex' : 'none';
     }
 
     // ── File selection ────────────────────────────────────────────────────────
@@ -507,7 +631,6 @@
         document.getElementById('btnRun').disabled = false;
     }
 
-    // ── SQL form input ────────────────────────────────────────────────────────
     function onSqlInput() {
         const val = document.getElementById('filterValue').value.trim();
         document.getElementById('btnSql').disabled = !val;
@@ -577,8 +700,10 @@
         }
     }
 
-    function resetToForms() {
+    async function resetToForms() {
         clearInterval(pollTimer);
+        try { await fetch('/api/reset', { method: 'POST' }); } catch { /* ignore */ }
+
         allRows = []; activeFilter = 'ALL'; excelFile = null; currentView = 'list';
         document.getElementById('dashboard').style.display  = 'none';
         document.getElementById('excel-form').style.display = currentTab === 'excel' ? 'flex' : 'none';
@@ -597,6 +722,8 @@
         document.getElementById('vtab-list').classList.add('active');
         document.getElementById('vtab-grouped').classList.remove('active');
         document.getElementById('filterTabs').style.display   = 'flex';
+        document.getElementById('errorBanner').style.display  = 'none';
+        document.getElementById('metricsSection').style.display = 'none';
         setStatusBadge('idle');
         document.getElementById('lastUpd').textContent = '';
         document.getElementById('sourceBadge').style.display = 'none';
@@ -624,6 +751,10 @@
             allRows = data.rows || [];
             applyData(data);
             document.getElementById('lastUpd').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-PT');
+            if (!data.running && pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
         } catch { /* ignore */ }
     }
     async function getStatus() {
@@ -634,60 +765,118 @@
 
     // ── Data application ──────────────────────────────────────────────────────
     function applyData(data) {
+        // Error banner
+        const eb = document.getElementById('errorBanner');
+        if (data.error && !data.running) {
+            eb.textContent   = '❌ Erro: ' + data.error;
+            eb.style.display = 'block';
+        } else {
+            eb.style.display = 'none';
+        }
+
         if      (data.error)         setStatusBadge('error');
         else if (data.running)       setStatusBadge('running');
         else if (allRows.length > 0) setStatusBadge('done');
         else                         setStatusBadge('idle');
 
-        const total    = allRows.length;
-        const expected = data.total || 0;
-        const matched  = allRows.filter(isMatch).length;
-        const notFound = allRows.filter(r => !isFound(r)).length;
-        const wrong    = total - matched - notFound;
-        const sn       = allRows.filter(isSN).length;
-        const effTotal = total - sn;
-        const effMatch = allRows.filter(r => isMatch(r) && !isSN(r)).length;
-        const effPct   = effTotal ? effMatch / effTotal * 100 : 0;
-        const runPct   = expected ? Math.min(100, total / expected * 100) : 0;
+        const total     = allRows.length;
+        const expected  = data.total || 0;
+        const matched   = allRows.filter(isMatch).length;
+        const noImagery = allRows.filter(isNoImagery).length;
+        const notFound  = allRows.filter(r => !isFound(r) && !isNoImagery(r)).length;
+        const wrong     = total - matched - notFound - noImagery;
+        const sn        = allRows.filter(isSN).length;
+        const effTotal  = total - sn - noImagery;
+        const effMatch  = allRows.filter(r => isMatch(r) && !isSN(r) && !isNoImagery(r)).length;
+        const effPct    = effTotal ? effMatch / effTotal * 100 : 0;
+        const runPct    = expected ? Math.min(100, total / expected * 100) : 0;
 
         document.getElementById('progDone').textContent      = total;
         document.getElementById('progTotal').textContent     = expected || '—';
         document.getElementById('progressFill').style.width  = runPct + '%';
         document.getElementById('progressPct').textContent   = expected ? runPct.toFixed(0) + '%' : '';
 
-        document.getElementById('kTotal').textContent    = total;
-        document.getElementById('kMatch').textContent    = matched;
-        document.getElementById('kMatchSub').textContent = total ? pct(matched, total) + ' do total' : '—';
-        document.getElementById('kWrong').textContent    = wrong;
-        document.getElementById('kWrongSub').textContent = total ? pct(wrong, total) + ' do total' : '—';
-        document.getElementById('kNF').textContent       = notFound;
-        document.getElementById('kNFSub').textContent    = total ? pct(notFound, total) + ' do total' : '—';
+        document.getElementById('kTotal').textContent      = total;
+        document.getElementById('kMatch').textContent      = matched;
+        document.getElementById('kMatchSub').textContent   = total ? pct(matched, total) + ' do total' : '—';
+        document.getElementById('kWrong').textContent      = wrong;
+        document.getElementById('kWrongSub').textContent   = total ? pct(wrong, total) + ' do total' : '—';
+        document.getElementById('kNF').textContent         = notFound;
+        document.getElementById('kNFSub').textContent      = total ? pct(notFound, total) + ' do total' : '—';
+        document.getElementById('kNoImg').textContent      = noImagery;
+        document.getElementById('kNoImgSub').textContent   = total ? pct(noImagery, total) + ' do total' : '—';
 
         document.getElementById('accValue').textContent = effTotal ? effPct.toFixed(1) + '%' : '—';
         document.getElementById('accFrac').textContent  = effTotal ? `${effMatch} / ${effTotal}` : '— / —';
         document.getElementById('accFill').style.width  = effPct + '%';
         document.getElementById('tcSub1').textContent   = `${total} registo${total !== 1 ? 's' : ''}`;
 
-        renderFilterTabs(total, matched, wrong, notFound, sn);
+        // ── Live metrics panel ────────────────────────────────────────────────
+        const m = data.metrics;
+        const metricsSection = document.getElementById('metricsSection');
+        if (m && m.n_total > 0) {
+            metricsSection.style.display = '';
+            const cur = m.currency || '€';
+
+            // Time
+            document.getElementById('mAvgTime').textContent  = m.avg_time_per_detection_s + 's';
+            document.getElementById('mTotalTime').textContent = 'Total: ' + fmtDuration(m.total_time_s);
+            document.getElementById('mMinMax').textContent   = m.min_time_s + 's / ' + m.max_time_s + 's';
+
+            // API calls
+            document.getElementById('mAvgCalls').textContent  = m.avg_image_calls_per_detection;
+            document.getElementById('mTotalCalls').textContent = 'Total: ' + m.total_image_api_calls + ' chamadas';
+
+            // Cost
+            document.getElementById('mTotalCost').textContent = cur + m.total_cost.toFixed(4);
+            document.getElementById('mAvgCost').textContent   = cur + m.avg_cost_per_detection.toFixed(4);
+            document.getElementById('mCostBasis').textContent = cur + m.cost_per_image_call.toFixed(4) + ' / chamada';
+
+            // Live indicator
+            const dot   = document.getElementById('liveDot');
+            const label = document.getElementById('liveLabel');
+            if (data.running) {
+                dot.classList.add('active');
+                label.textContent = 'Em direto';
+                label.classList.add('active');
+            } else {
+                dot.classList.remove('active');
+                label.textContent = 'Concluído';
+                label.classList.remove('active');
+            }
+        } else {
+            metricsSection.style.display = 'none';
+        }
+
+        renderFilterTabs(total, matched, wrong, notFound, sn, noImagery);
         renderMainTable();
         renderGroupedTable();
         renderNonMatchTable();
     }
 
+    function fmtDuration(secs) {
+        const s = Math.floor(secs);
+        if (s < 60)   return s + 's';
+        if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+        return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    }
+
     // ── Predicates ────────────────────────────────────────────────────────────
-    const isMatch = r => /^(true|yes|✓)/i.test((r.MATCH || '').trim());
-    const isFound = r => /^(true|yes)/i.test((r.PREDICTION_FOUND || '').trim());
-    const isSN    = r => (r.NOME_COMPLETO_PORTA || '').trim().toUpperCase() === 'SN';
-    const pct     = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '—';
+    const isMatch     = r => /^(true|yes|✓)/i.test((r.MATCH || '').trim());
+    const isFound     = r => /^yes$/i.test((r.PREDICTION_FOUND || '').trim());
+    const isNoImagery = r => (r.PREDICTION_FOUND || '').trim().toUpperCase() === 'NO_IMAGERY';
+    const isSN        = r => (r.NOME_COMPLETO_PORTA || '').trim().toUpperCase() === 'SN';
+    const pct         = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '—';
 
     // ── Filter tabs ───────────────────────────────────────────────────────────
-    function renderFilterTabs(total, matched, wrong, notFound, sn) {
+    function renderFilterTabs(total, matched, wrong, notFound, sn, noImagery) {
         const tabs = [
-            { id: 'ALL',       label: `Todos (${total})`             },
-            { id: 'MATCH',     label: `Match (${matched})`           },
-            { id: 'WRONG',     label: `Upgrade (${wrong})`           },
-            { id: 'NOT_FOUND', label: `Nao encontrado (${notFound})` },
-            { id: 'SN',        label: `SN (${sn})`                   },
+            { id: 'ALL',        label: `Todos (${total})`                 },
+            { id: 'MATCH',      label: `Match (${matched})`               },
+            { id: 'WRONG',      label: `Upgrade (${wrong})`               },
+            { id: 'NOT_FOUND',  label: `Nao encontrado (${notFound})`     },
+            { id: 'NO_IMAGERY', label: `Sem cobertura GSV (${noImagery})` },
+            { id: 'SN',         label: `SN (${sn})`                       },
         ];
         document.getElementById('filterTabs').innerHTML = tabs.map(t =>
             `<button class="tab${t.id === activeFilter ? ' active' : ''}" onclick="setFilter('${t.id}')">${t.label}</button>`
@@ -695,21 +884,23 @@
     }
     function setFilter(f) {
         activeFilter = f;
-        const total    = allRows.length;
-        const matched  = allRows.filter(isMatch).length;
-        const notFound = allRows.filter(r => !isFound(r)).length;
-        const wrong    = total - matched - notFound;
-        const sn       = allRows.filter(isSN).length;
-        renderFilterTabs(total, matched, wrong, notFound, sn);
+        const total     = allRows.length;
+        const matched   = allRows.filter(isMatch).length;
+        const noImagery = allRows.filter(isNoImagery).length;
+        const notFound  = allRows.filter(r => !isFound(r) && !isNoImagery(r)).length;
+        const wrong     = total - matched - notFound - noImagery;
+        const sn        = allRows.filter(isSN).length;
+        renderFilterTabs(total, matched, wrong, notFound, sn, noImagery);
         renderMainTable();
     }
     function filteredRows() {
         switch (activeFilter) {
-            case 'MATCH':     return allRows.filter(isMatch);
-            case 'WRONG':     return allRows.filter(r => !isMatch(r) && isFound(r));
-            case 'NOT_FOUND': return allRows.filter(r => !isFound(r));
-            case 'SN':        return allRows.filter(isSN);
-            default:          return allRows;
+            case 'MATCH':      return allRows.filter(isMatch);
+            case 'WRONG':      return allRows.filter(r => !isMatch(r) && isFound(r));
+            case 'NOT_FOUND':  return allRows.filter(r => !isFound(r) && !isNoImagery(r));
+            case 'NO_IMAGERY': return allRows.filter(isNoImagery);
+            case 'SN':         return allRows.filter(isSN);
+            default:           return allRows;
         }
     }
 
@@ -719,19 +910,32 @@
         for (const r of allRows) {
             const key = `${r.LATITUDE}|${r.LONGITUDE}`;
             if (!map.has(key)) {
-                map.set(key, { lat: r.LATITUDE, lon: r.LONGITUDE, prediction: r.PREDICTION, confidence: r.CONFIDENCE, rows: [] });
+                map.set(key, { lat: r.LATITUDE, lon: r.LONGITUDE, prediction: r.PREDICTION, confidence: r.CONFIDENCE, hasNoImagery: false, rows: [] });
             }
-            map.get(key).rows.push(r);
+            const g = map.get(key);
+            if (isNoImagery(r)) g.hasNoImagery = true;
+            g.rows.push(r);
         }
         return [...map.values()].sort((a, b) => b.rows.length - a.rows.length);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    function rowClass(r)  { return isMatch(r) ? 'r-match' : !isFound(r) ? 'r-notfound' : 'r-wrong'; }
+    function rowClass(r) {
+        if (isNoImagery(r)) return 'r-no-imagery';
+        if (isMatch(r))     return 'r-match';
+        if (!isFound(r))    return 'r-notfound';
+        return 'r-wrong';
+    }
     function badgeHtml(r) {
-        if (isMatch(r))  return '<span class="badge b-match">Match</span>';
-        if (!isFound(r)) return '<span class="badge b-notfound">Nao encontrado</span>';
+        if (isNoImagery(r)) return '<span class="badge b-no-imagery">📷 Sem cobertura</span>';
+        if (isMatch(r))     return '<span class="badge b-match">Match</span>';
+        if (!isFound(r))    return '<span class="badge b-notfound">Nao encontrado</span>';
         return '<span class="badge b-wrong">Upgrade</span>';
+    }
+    function obsTd(r) {
+        const obs = (r.OBSERVATION || '').trim();
+        if (!obs) return `<td style="color:var(--text-faint)">—</td>`;
+        return `<td><span class="badge b-no-imagery" title="${obs}">📷 Sem GSV</span></td>`;
     }
     function confHtml(c) {
         const n = parseInt(c) || 0;
@@ -754,7 +958,7 @@
         const rows  = filteredRows();
         const tbody = document.getElementById('tbody1');
         if (!rows.length) {
-            tbody.innerHTML = `<tr class="empty-row"><td colspan="7">Sem resultados nesta categoria.</td></tr>`;
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Sem resultados nesta categoria.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
@@ -764,6 +968,7 @@
                 <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
+                ${obsTd(r)}
                 <td>${mapHtml(r)}</td>
                 <td>${coordsHtml(r)}</td>
             </tr>`;
@@ -795,12 +1000,14 @@
         tbody.innerHTML = groups.map((g, i) => {
             const matched  = g.rows.filter(isMatch).length;
             const upgraded = g.rows.filter(r => !isMatch(r) && isFound(r)).length;
-            const notFound = g.rows.filter(r => !isFound(r)).length;
+            const notFound = g.rows.filter(r => !isFound(r) && !isNoImagery(r)).length;
+            const noImg    = g.rows.filter(isNoImagery).length;
             const isMulti  = g.rows.length > 1;
 
             const doorsHtml = `<div class="door-badges">${g.rows.map(r => {
-                const cls = isMatch(r) ? 'b-match' : !isFound(r) ? 'b-notfound' : 'b-wrong';
-                return `<span class="badge ${cls}" title="${isMatch(r) ? 'Match' : !isFound(r) ? 'Nao encontrado' : 'Upgrade'}">${r.NOME_COMPLETO_PORTA || '—'}</span>`;
+                const cls = isNoImagery(r) ? 'b-no-imagery' : isMatch(r) ? 'b-match' : !isFound(r) ? 'b-notfound' : 'b-wrong';
+                const lbl = isNoImagery(r) ? 'Sem cobertura' : isMatch(r) ? 'Match' : !isFound(r) ? 'Nao encontrado' : 'Upgrade';
+                return `<span class="badge ${cls}" title="${lbl}">${r.NOME_COMPLETO_PORTA || '—'}</span>`;
             }).join('')}</div>`;
 
             const coords  = (g.lat && g.lon) ? `${g.lat}, ${g.lon}` : '—';
@@ -808,21 +1015,24 @@
                 ? `<a class="map-link" href="https://www.google.com/maps?q=${g.lat},${g.lon}" target="_blank">Ver ↗</a>`
                 : '—';
 
+            const predCell = g.hasNoImagery && !g.prediction
+                ? `<span class="badge b-no-imagery">📷 Sem cobertura</span>`
+                : `<span class="mono" style="font-weight:400;color:var(--text-muted)">${g.prediction || '—'}</span>`;
+
             const summaryParts = [];
             if (matched)  summaryParts.push(`<span class="badge b-match">${matched} ✓</span>`);
             if (upgraded) summaryParts.push(`<span class="badge b-wrong">${upgraded} ↑</span>`);
             if (notFound) summaryParts.push(`<span class="badge b-notfound">${notFound} ?</span>`);
+            if (noImg)    summaryParts.push(`<span class="badge b-no-imagery">${noImg} 📷</span>`);
             const summary = `<div class="loc-summary">${summaryParts.join('')}</div>`;
 
-            const multiTag = isMulti
-                ? `&nbsp;<span class="badge b-multi">${g.rows.length}×</span>`
-                : '';
+            const multiTag = isMulti ? `&nbsp;<span class="badge b-multi">${g.rows.length}×</span>` : '';
 
             return `<tr class="${isMulti ? 'r-multi-loc' : ''}">
                 <td class="idx">${i + 1}${multiTag}</td>
                 <td><span class="coords-text">${coords}</span></td>
                 <td>${mapLink}</td>
-                <td class="mono" style="font-weight:400;color:var(--text-muted)">${g.prediction || '—'}</td>
+                <td>${predCell}</td>
                 <td>${confHtml(g.confidence)}</td>
                 <td>${doorsHtml}</td>
                 <td>${summary}</td>
@@ -838,7 +1048,7 @@
             ? `${rows.length} morada${rows.length !== 1 ? 's' : ''} para verificar`
             : 'Nenhuma por agora';
         if (!rows.length) {
-            tbody.innerHTML = `<tr class="empty-row"><td colspan="7">Sem erros registados.</td></tr>`;
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Sem erros registados.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
@@ -848,6 +1058,7 @@
                 <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
+                ${obsTd(r)}
                 <td>${mapHtml(r)}</td>
                 <td>${coordsHtml(r)}</td>
             </tr>`;
@@ -864,3 +1075,4 @@
 </script>
 </body>
 </html>
+
