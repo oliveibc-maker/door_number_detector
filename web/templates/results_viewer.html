@@ -11,45 +11,33 @@
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
-            --font:         'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            --bg:           #f1f5f9;
-            --surface:      #ffffff;
-            --border:       #e2e8f0;
-            --border-sub:   #f1f5f9;
-            --text:         #0f172a;
-            --text-muted:   #64748b;
-            --text-faint:   #94a3b8;
-            --primary:      #1d4ed8;
-            --primary-dark: #1e40af;
-            --primary-light:#eff6ff;
-            --green:        #15803d;
-            --green-bg:     #f0fdf4;
-            --red:          #b91c1c;
-            --red-bg:       #fef2f2;
-            --amber:        #92400e;
-            --amber-bg:     #fffbeb;
+            --font:          'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --bg:            #f1f5f9;
+            --surface:       #ffffff;
+            --border:        #e2e8f0;
+            --border-sub:    #f1f5f9;
+            --text:          #0f172a;
+            --text-muted:    #64748b;
+            --text-faint:    #94a3b8;
+            --primary:       #1d4ed8;
+            --primary-dark:  #1e40af;
+            --primary-light: #eff6ff;
+            --green:         #15803d;
+            --green-bg:      #f0fdf4;
+            --red:           #b91c1c;
+            --red-bg:        #fef2f2;
+            --amber:         #92400e;
+            --amber-bg:      #fffbeb;
+            --slate:         #475569;
+            --slate-bg:      #f8fafc;
         }
 
-        body {
-            font-family: var(--font);
-            background: var(--bg);
-            color: var(--text);
-            font-size: 14px;
-            line-height: 1.5;
-            min-height: 100vh;
-        }
+        body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; min-height: 100vh; }
 
         header {
-            background: #0f172a;
-            color: white;
-            padding: 0 2rem;
-            height: 52px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 100;
+            background: #0f172a; color: white; padding: 0 2rem; height: 52px;
+            display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
         }
         .brand       { display: flex; align-items: baseline; gap: 10px; }
         .brand-name  { font-size: 14px; font-weight: 700; letter-spacing: -.02em; color: #f1f5f9; }
@@ -58,42 +46,41 @@
         .header-right { display: flex; align-items: center; gap: 14px; }
         .last-upd    { font-size: 11px; color: #334155; }
 
-        .status-badge {
-            font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 3px;
-            text-transform: uppercase; letter-spacing: .07em;
-        }
-        .sb-idle { background: #1e293b; color: #475569; }
-        .sb-live { background: #14532d; color: #86efac; animation: pulse 2s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+        .status-badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: .07em; }
+        .sb-idle   { background: #1e293b; color: #475569; }
+        .sb-live   { background: #14532d; color: #86efac; animation: pulse-badge 2s infinite; }
+        .sb-loaded { background: #1e3a5f; color: #93c5fd; }
+        .sb-error  { background: #7f1d1d; color: #fca5a5; }
+        @keyframes pulse-badge { 0%,100%{opacity:1} 50%{opacity:.6} }
 
-        main { max-width: 1160px; margin: 0 auto; padding: 2rem; }
+        main { max-width: 1300px; margin: 0 auto; padding: 2rem; }
 
-        /* Upload screen */
+        /* ── Upload screen ─────────────────────────────────────────────────── */
         #upload-screen {
             display: flex; flex-direction: column; align-items: center;
             justify-content: center; min-height: calc(100vh - 52px);
         }
         .upload-card {
             background: var(--surface); border: 1px solid var(--border);
-            border-radius: 10px; padding: 40px 48px; width: 100%; max-width: 460px; text-align: center;
+            border-radius: 10px; padding: 40px 48px; width: 100%; max-width: 480px; text-align: center;
         }
         .upload-card-title { font-size: 17px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 6px; }
         .upload-card-sub   { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; line-height: 1.6; }
 
         .drop-zone {
-            border: 1.5px dashed var(--border); border-radius: 8px;
-            padding: 32px 24px; cursor: pointer; transition: all .18s;
-            background: var(--bg);
+            border: 1.5px dashed var(--border); border-radius: 8px; padding: 28px 24px;
+            cursor: pointer; transition: all .18s; background: var(--bg);
         }
         .drop-zone:hover, .drop-zone.over { border-color: var(--primary); background: var(--primary-light); }
+        .drop-zone.loaded { border-style: solid; border-color: var(--primary); background: var(--primary-light); }
         .drop-label { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
         .drop-hint  { font-size: 12px; color: var(--text-muted); }
         .drop-file  { font-size: 12px; font-weight: 600; color: var(--primary); margin-top: 10px; word-break: break-all; display: none; }
-        .drop-note  { font-size: 11px; color: var(--text-faint); margin-top: 20px; }
+        .drop-note  { font-size: 11px; color: var(--text-faint); margin-top: 16px; }
 
-        /* Dashboard */
+        /* ── Dashboard ─────────────────────────────────────────────────────── */
         #dashboard { display: none; }
-        .section { margin-bottom: 16px; }
+        .section   { margin-bottom: 16px; }
 
         /* Top bar */
         .top-bar {
@@ -111,7 +98,7 @@
         .btn-change:hover { border-color: var(--text-muted); color: var(--text); }
 
         /* KPIs */
-        .kpi-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+        .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
         .kpi {
             background: var(--surface); border: 1px solid var(--border);
             border-top: 3px solid var(--border); border-radius: 8px; padding: 15px 18px;
@@ -119,6 +106,7 @@
         .kpi.green { border-top-color: #22c55e; } .kpi.green .kpi-value { color: var(--green); }
         .kpi.red   { border-top-color: #ef4444; } .kpi.red   .kpi-value { color: var(--red);   }
         .kpi.amber { border-top-color: #f59e0b; } .kpi.amber .kpi-value { color: var(--amber); }
+        .kpi.slate { border-top-color: #94a3b8; } .kpi.slate .kpi-value { color: var(--slate); }
         .kpi-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px; }
         .kpi-value { font-size: 30px; font-weight: 800; color: var(--text); line-height: 1; letter-spacing: -.04em; }
         .kpi-sub   { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
@@ -144,6 +132,14 @@
         .tc-title { font-size: 13px; font-weight: 600; color: var(--text); }
         .tc-sub   { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
 
+        .view-toggle { display: flex; gap: 2px; background: var(--bg); border-radius: 6px; padding: 3px; }
+        .vtab {
+            padding: 4px 14px; border: none; border-radius: 4px; cursor: pointer;
+            font-family: var(--font); font-size: 12px; font-weight: 500;
+            background: none; color: var(--text-muted); transition: all .12s;
+        }
+        .vtab.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+
         .tabs { display: flex; gap: 2px; flex-wrap: wrap; }
         .tab  {
             padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer;
@@ -152,6 +148,15 @@
         }
         .tab:hover  { background: var(--bg); color: var(--text); }
         .tab.active { background: #dbeafe; color: var(--primary); font-weight: 600; }
+
+        .grouped-info-bar {
+            padding: 7px 16px; background: #f8fafc; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        }
+        .dup-warn {
+            font-size: 11px; font-weight: 600; color: #5b21b6;
+            background: #ede9fe; padding: 2px 10px; border-radius: 3px;
+        }
 
         table { width: 100%; border-collapse: collapse; }
         th    {
@@ -162,19 +167,29 @@
         td { padding: 9px 14px; font-size: 13px; border-bottom: 1px solid var(--border-sub); vertical-align: middle; }
         tr:last-child td { border-bottom: none; }
 
-        tr.r-match    { background: var(--green-bg); } tr.r-match    td:first-child { border-left: 3px solid #22c55e; }
-        tr.r-wrong    { background: var(--red-bg);   } tr.r-wrong    td:first-child { border-left: 3px solid #ef4444; }
-        tr.r-notfound { background: var(--amber-bg); } tr.r-notfound td:first-child { border-left: 3px solid #f59e0b; }
+        tr.r-match      { background: var(--green-bg); }
+        tr.r-wrong      { background: var(--red-bg);   }
+        tr.r-notfound   { background: var(--amber-bg); }
+        tr.r-no-imagery { background: var(--slate-bg); }
 
-        .mono  { font-family: 'SF Mono','Fira Code',ui-monospace,monospace; font-weight: 600; font-size: 13px; }
-        .badge {
-            display: inline-block; font-size: 10px; font-weight: 700;
-            padding: 2px 7px; border-radius: 3px;
-            text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
-        }
-        .b-match    { background: #dcfce7; color: #166534; }
-        .b-wrong    { background: #fee2e2; color: #991b1b; }
-        .b-notfound { background: #fef3c7; color: #78350f; }
+        tr.r-match      td:first-child { border-left: 3px solid #22c55e; }
+        tr.r-wrong      td:first-child { border-left: 3px solid #ef4444; }
+        tr.r-notfound   td:first-child { border-left: 3px solid #f59e0b; }
+        tr.r-no-imagery td:first-child { border-left: 3px solid #94a3b8; }
+
+        tr.r-multi-loc            { background: #faf5ff; }
+        tr.r-multi-loc td:first-child { border-left: 3px solid #7c3aed; }
+
+        .door-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+        .loc-summary { display: flex; gap: 4px; flex-wrap: wrap; }
+
+        .mono  { font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; font-weight: 600; font-size: 13px; }
+        .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+        .b-match      { background: #dcfce7; color: #166534; }
+        .b-wrong      { background: #fee2e2; color: #991b1b; }
+        .b-notfound   { background: #fef3c7; color: #78350f; }
+        .b-multi      { background: #ede9fe; color: #5b21b6; }
+        .b-no-imagery { background: #f1f5f9; color: #475569; }
 
         .conf-wrap { display: flex; align-items: center; gap: 8px; }
         .conf-bar  { width: 48px; height: 3px; background: #e2e8f0; border-radius: 2px; overflow: hidden; flex-shrink: 0; }
@@ -184,18 +199,18 @@
         .map-link { font-size: 12px; font-weight: 500; color: var(--primary); text-decoration: none; white-space: nowrap; }
         .map-link:hover { text-decoration: underline; }
 
+        .coords-text { font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; white-space: nowrap; }
+
         .divider       { display: flex; align-items: center; gap: 14px; margin: 24px 0 14px; }
         .divider-line  { flex: 1; height: 1px; background: var(--border); }
         .divider-label { font-size: 11px; font-weight: 700; color: var(--red); text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
 
-        .idx { color: var(--text-faint); font-size: 11px; font-family: ui-monospace, monospace; }
         .empty-row td { text-align: center; padding: 28px; color: var(--text-faint); font-size: 13px; }
+        .idx { color: var(--text-faint); font-size: 11px; font-family: ui-monospace, monospace; }
 
-        @media (max-width: 680px) {
-            .kpi-row { grid-template-columns: 1fr 1fr; }
-            main { padding: 1rem; }
-            .upload-card { padding: 28px 20px; }
-        }
+        @media (max-width: 1100px) { .kpi-row { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 900px)  { .kpi-row { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); } }
+        @media (max-width: 680px)  { .kpi-row { grid-template-columns: 1fr 1fr; } main { padding: 1rem; } .upload-card { padding: 28px 24px; } }
     </style>
 </head>
 <body>
@@ -214,14 +229,13 @@
 
 <main>
 
-    <!-- Upload screen -->
+    <!-- ══ UPLOAD SCREEN ══ -->
     <div id="upload-screen">
         <div class="upload-card">
             <div class="upload-card-title">Visualizador de Resultados</div>
-            <div class="upload-card-sub">Abre o ficheiro CSV gerado pelo pipeline para visualizar os resultados.</div>
+            <div class="upload-card-sub">Abre o ficheiro CSV gerado pelo pipeline para visualizar os resultados de validação de moradas.</div>
 
             <div class="drop-zone" id="dropZone"
-                onclick="document.getElementById('fileInput').click()"
                 ondragover="onDragOver(event)"
                 ondragleave="onDragLeave()"
                 ondrop="onDrop(event)">
@@ -234,7 +248,7 @@
         </div>
     </div>
 
-    <!-- Dashboard -->
+    <!-- ══ DASHBOARD ══ -->
     <div id="dashboard">
 
         <!-- Top bar -->
@@ -245,7 +259,7 @@
             </div>
         </div>
 
-        <!-- KPIs -->
+        <!-- KPI row -->
         <div class="section kpi-row">
             <div class="kpi">
                 <div class="kpi-label">Total</div>
@@ -257,7 +271,7 @@
                 <div class="kpi-sub" id="kMatchSub">—</div>
             </div>
             <div class="kpi red">
-                <div class="kpi-label">Update</div>
+                <div class="kpi-label">Upgrade</div>
                 <div class="kpi-value" id="kWrong">0</div>
                 <div class="kpi-sub" id="kWrongSub">—</div>
             </div>
@@ -266,13 +280,18 @@
                 <div class="kpi-value" id="kNF">0</div>
                 <div class="kpi-sub" id="kNFSub">—</div>
             </div>
+            <div class="kpi slate">
+                <div class="kpi-label">Sem Cobertura GSV</div>
+                <div class="kpi-value" id="kNoImg">0</div>
+                <div class="kpi-sub" id="kNoImgSub">—</div>
+            </div>
         </div>
 
         <!-- Accuracy banner -->
         <div class="section">
             <div class="acc">
                 <div>
-                    <div class="acc-label">Precisao Efetiva  —  excl. moradas SN</div>
+                    <div class="acc-label">Precisao Efetiva — excl. SN e sem cobertura GSV</div>
                     <div class="acc-value" id="accValue">—</div>
                     <div class="acc-bar"><div class="acc-fill" id="accFill" style="width:0%"></div></div>
                 </div>
@@ -283,7 +302,7 @@
             </div>
         </div>
 
-        <!-- Full results table -->
+        <!-- Main table card -->
         <div class="section">
             <div class="table-card">
                 <div class="tc-header">
@@ -291,21 +310,56 @@
                         <div class="tc-title">Todos os Resultados</div>
                         <div class="tc-sub" id="tcSub1">—</div>
                     </div>
-                    <div class="tabs" id="filterTabs"></div>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <div class="view-toggle">
+                            <button class="vtab active" id="vtab-list"    onclick="setView('list')">Lista</button>
+                            <button class="vtab"        id="vtab-grouped" onclick="setView('grouped')">Por Localização</button>
+                        </div>
+                        <div class="tabs" id="filterTabs"></div>
+                    </div>
                 </div>
-                <div style="overflow-x:auto">
+
+                <!-- List view -->
+                <div id="view-list" style="overflow-x:auto">
                     <table>
                         <thead>
                             <tr>
                                 <th>#</th>
                                 <th>Esperado</th>
                                 <th>Previsto</th>
-                                <th>Confianca</th>
+                                <th>Confiança</th>
                                 <th>Estado</th>
+                                <th>Obs.</th>
+                                <th>Mapa</th>
+                                <th>Coordenadas</th>
                             </tr>
                         </thead>
                         <tbody id="tbody1"></tbody>
                     </table>
+                </div>
+
+                <!-- Grouped view -->
+                <div id="view-grouped" style="display:none">
+                    <div class="grouped-info-bar">
+                        <span class="tc-sub" id="tcSubGrouped">—</span>
+                        <span class="dup-warn" id="dupWarn" style="display:none"></span>
+                    </div>
+                    <div style="overflow-x:auto">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Coordenadas</th>
+                                    <th>Mapa</th>
+                                    <th>Previsto (OCR)</th>
+                                    <th>Confiança</th>
+                                    <th>Portas na BD</th>
+                                    <th>Resumo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbodyGrouped"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -333,9 +387,11 @@
                                 <th>#</th>
                                 <th>Esperado</th>
                                 <th>Previsto</th>
-                                <th>Confianca</th>
+                                <th>Confiança</th>
                                 <th>Estado</th>
+                                <th>Obs.</th>
                                 <th>Mapa</th>
+                                <th>Coordenadas</th>
                             </tr>
                         </thead>
                         <tbody id="tbody2"></tbody>
@@ -344,23 +400,27 @@
             </div>
         </div>
 
-    </div>
+    </div><!-- /dashboard -->
 </main>
 
 <script>
-    const hasFSA  = 'showOpenFilePicker' in window;
-    const POLL_MS = 3000;
-
+    // ── State ─────────────────────────────────────────────────────────────────
+    const hasFSA     = 'showOpenFilePicker' in window;
+    const POLL_MS    = 3000;
     let fileHandle   = null;
     let fallbackFile = null;
     let allRows      = [];
     let activeFilter = 'ALL';
+    let currentView  = 'list';
     let pollTimer    = null;
 
     // ── File selection ────────────────────────────────────────────────────────
-    function onFileChange(e) { const f = e.target.files?.[0]; if (f) { fallbackFile = f; fileHandle = null; loadFile(f.name); } }
-    function onDragOver(e)   { e.preventDefault(); document.getElementById('dropZone').classList.add('over'); }
-    function onDragLeave()   { document.getElementById('dropZone').classList.remove('over'); }
+    function onFileChange(e) {
+        const f = e.target.files?.[0];
+        if (f) { fallbackFile = f; fileHandle = null; loadFile(f.name); }
+    }
+    function onDragOver(e)  { e.preventDefault(); document.getElementById('dropZone').classList.add('over'); }
+    function onDragLeave()  { document.getElementById('dropZone').classList.remove('over'); }
 
     async function onDrop(e) {
         e.preventDefault();
@@ -380,17 +440,16 @@
     async function openFilePicker() {
         if (!hasFSA) { document.getElementById('fileInput').click(); return; }
         try {
-            [fileHandle] = await window.showOpenFilePicker({ types: [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }] });
+            [fileHandle] = await window.showOpenFilePicker({
+                types: [{ description: 'CSV', accept: { 'text/csv': ['.csv'] } }]
+            });
             fallbackFile = null;
             const f = await fileHandle.getFile();
             loadFile(f.name);
         } catch {}
     }
 
-    // hook up click on drop zone to picker when FSA available
-    document.getElementById('dropZone').addEventListener('click', e => {
-        if (hasFSA) { e.stopImmediatePropagation(); openFilePicker(); }
-    });
+    document.getElementById('dropZone').addEventListener('click', () => openFilePicker());
 
     function loadFile(name) {
         document.getElementById('upload-screen').style.display = 'none';
@@ -420,12 +479,19 @@
 
             allRows = parseCSV(text);
             render();
-            document.getElementById('lastUpd').textContent    = 'Atualizado: ' + new Date().toLocaleTimeString('pt-PT');
-            document.getElementById('statusBadge').className  = 'status-badge sb-live';
-            document.getElementById('statusBadge').textContent = hasFSA && fileHandle ? 'Live' : 'Carregado';
+            document.getElementById('lastUpd').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-PT');
+            const badge = document.getElementById('statusBadge');
+            if (hasFSA && fileHandle) {
+                badge.className   = 'status-badge sb-live';
+                badge.textContent = 'Live';
+            } else {
+                badge.className   = 'status-badge sb-loaded';
+                badge.textContent = 'Carregado';
+            }
         } catch {
-            document.getElementById('statusBadge').className   = 'status-badge sb-idle';
-            document.getElementById('statusBadge').textContent = 'Erro';
+            const badge = document.getElementById('statusBadge');
+            badge.className   = 'status-badge sb-error';
+            badge.textContent = 'Erro';
         }
     }
 
@@ -433,7 +499,37 @@
     function parseCSV(text) {
         const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
         if (lines.length < 2) return [];
-        const headers = lines[0].split(';').map(h => h.replace(/^\uFEFF/, '').trim());
+
+        // The format in this file repeats headers on each line before values.
+        // Detect if first line is a pure header (no lat/lon data values).
+        // Strategy: find the canonical header line, then parse all data lines.
+        const firstLine = lines[0];
+        const headers   = firstLine.split(';').map(h => h.replace(/^\uFEFF/, '').trim());
+
+        // Check if this is the "header repeated on each row" format
+        const isRepeatedHeader = lines.length > 1 && lines[1].startsWith(headers[0]);
+
+        if (isRepeatedHeader) {
+            // Each line has: HEADER_STRING: value1;value2;...
+            // Format observed: "LATITUDE;LONGITUDE;...;OBSERVATION: val1;val2;..."
+            // The header part ends at the colon after OBSERVATION
+            const rows = [];
+            for (const line of lines) {
+                // Strip the repeated header prefix up to the first colon
+                const colonIdx = line.indexOf(':');
+                if (colonIdx === -1) continue;
+                const valStr = line.substring(colonIdx + 1).trim();
+                const vals   = valStr.split(';');
+                // Headers without the "OBSERVATION" suffix colon
+                const cleanHeaders = headers.map(h => h.replace(/:$/, '').trim());
+                const obj = {};
+                cleanHeaders.forEach((h, i) => obj[h] = (vals[i] || '').trim());
+                if (obj['LATITUDE'] && obj['LONGITUDE']) rows.push(obj);
+            }
+            return rows;
+        }
+
+        // Standard CSV
         return lines.slice(1).map(line => {
             const vals = line.split(';');
             const obj  = {};
@@ -443,21 +539,27 @@
     }
 
     // ── Predicates ────────────────────────────────────────────────────────────
-    const isMatch = r => /^(true|yes|✓)/i.test((r.MATCH || '').trim());
-    const isFound = r => /^(true|yes)/i.test((r.PREDICTION_FOUND || '').trim());
-    const isSN    = r => (r.NOME_COMPLETO_PORTA || '').trim().toUpperCase() === 'SN';
-    const pct     = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '—';
+    const isMatch     = r => /^(true|yes|✓)/i.test((r.MATCH || '').trim()) || (r.MATCH || '').includes('MATCH');
+    const isFound     = r => /^yes$/i.test((r.PREDICTION_FOUND || '').trim());
+    const isNoImagery = r => {
+        const pf  = (r.PREDICTION_FOUND || '').trim().toUpperCase();
+        const nsi = (r.NO_STREET_VIEW_IMAGERY || '').trim().toUpperCase();
+        return pf === 'NO_IMAGERY' || nsi === 'TRUE' || nsi === 'YES' || nsi === '1';
+    };
+    const isSN        = r => (r.NOME_COMPLETO_PORTA || '').trim().toUpperCase() === 'SN';
+    const pct         = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '—';
 
     // ── Render ────────────────────────────────────────────────────────────────
     function render() {
-        const total    = allRows.length;
-        const matched  = allRows.filter(isMatch).length;
-        const notFound = allRows.filter(r => !isFound(r)).length;
-        const wrong    = total - matched - notFound;
-        const sn       = allRows.filter(isSN).length;
-        const effTotal = total - sn;
-        const effMatch = allRows.filter(r => isMatch(r) && !isSN(r)).length;
-        const effPct   = effTotal ? effMatch / effTotal * 100 : 0;
+        const total     = allRows.length;
+        const matched   = allRows.filter(isMatch).length;
+        const noImagery = allRows.filter(isNoImagery).length;
+        const notFound  = allRows.filter(r => !isFound(r) && !isNoImagery(r)).length;
+        const wrong     = total - matched - notFound - noImagery;
+        const sn        = allRows.filter(isSN).length;
+        const effTotal  = total - sn - noImagery;
+        const effMatch  = allRows.filter(r => isMatch(r) && !isSN(r) && !isNoImagery(r)).length;
+        const effPct    = effTotal ? effMatch / effTotal * 100 : 0;
 
         document.getElementById('kTotal').textContent    = total;
         document.getElementById('kMatch').textContent    = matched;
@@ -466,24 +568,29 @@
         document.getElementById('kWrongSub').textContent = pct(wrong, total) + ' do total';
         document.getElementById('kNF').textContent       = notFound;
         document.getElementById('kNFSub').textContent    = pct(notFound, total) + ' do total';
+        document.getElementById('kNoImg').textContent    = noImagery;
+        document.getElementById('kNoImgSub').textContent = pct(noImagery, total) + ' do total';
 
-        document.getElementById('accValue').textContent  = effTotal ? effPct.toFixed(1) + '%' : '—';
-        document.getElementById('accFrac').textContent   = `${effMatch} / ${effTotal}`;
-        document.getElementById('accFill').style.width   = effPct + '%';
-        document.getElementById('tcSub1').textContent    = `${total} registo${total !== 1 ? 's' : ''}`;
+        document.getElementById('accValue').textContent = effTotal ? effPct.toFixed(1) + '%' : '—';
+        document.getElementById('accFrac').textContent  = `${effMatch} / ${effTotal}`;
+        document.getElementById('accFill').style.width  = effPct + '%';
+        document.getElementById('tcSub1').textContent   = `${total} registo${total !== 1 ? 's' : ''}`;
 
-        renderTabs(total, matched, wrong, notFound, sn);
+        renderFilterTabs(total, matched, wrong, notFound, sn, noImagery);
         renderMainTable();
+        renderGroupedTable();
         renderNonMatchTable();
     }
 
-    function renderTabs(total, matched, wrong, notFound, sn) {
+    // ── Filter tabs ───────────────────────────────────────────────────────────
+    function renderFilterTabs(total, matched, wrong, notFound, sn, noImagery) {
         const tabs = [
-            { id: 'ALL',       label: `Todos (${total})`             },
-            { id: 'MATCH',     label: `Match (${matched})`           },
-            { id: 'WRONG',     label: `Update (${wrong})`            },
-            { id: 'NOT_FOUND', label: `Nao encontrado (${notFound})` },
-            { id: 'SN',        label: `SN (${sn})`                   },
+            { id: 'ALL',        label: `Todos (${total})`                 },
+            { id: 'MATCH',      label: `Match (${matched})`               },
+            { id: 'WRONG',      label: `Upgrade (${wrong})`               },
+            { id: 'NOT_FOUND',  label: `Nao encontrado (${notFound})`     },
+            { id: 'NO_IMAGERY', label: `Sem cobertura GSV (${noImagery})` },
+            { id: 'SN',         label: `SN (${sn})`                       },
         ];
         document.getElementById('filterTabs').innerHTML = tabs.map(t =>
             `<button class="tab${t.id === activeFilter ? ' active' : ''}" onclick="setFilter('${t.id}')">${t.label}</button>`
@@ -492,32 +599,80 @@
 
     function setFilter(f) {
         activeFilter = f;
-        const total    = allRows.length;
-        const matched  = allRows.filter(isMatch).length;
-        const notFound = allRows.filter(r => !isFound(r)).length;
-        const wrong    = total - matched - notFound;
-        const sn       = allRows.filter(isSN).length;
-        renderTabs(total, matched, wrong, notFound, sn);
+        const total     = allRows.length;
+        const matched   = allRows.filter(isMatch).length;
+        const noImagery = allRows.filter(isNoImagery).length;
+        const notFound  = allRows.filter(r => !isFound(r) && !isNoImagery(r)).length;
+        const wrong     = total - matched - notFound - noImagery;
+        const sn        = allRows.filter(isSN).length;
+        renderFilterTabs(total, matched, wrong, notFound, sn, noImagery);
         renderMainTable();
     }
 
     function filteredRows() {
         switch (activeFilter) {
-            case 'MATCH':     return allRows.filter(isMatch);
-            case 'WRONG':     return allRows.filter(r => !isMatch(r) && isFound(r));
-            case 'NOT_FOUND': return allRows.filter(r => !isFound(r));
-            case 'SN':        return allRows.filter(isSN);
-            default:          return allRows;
+            case 'MATCH':      return allRows.filter(isMatch);
+            case 'WRONG':      return allRows.filter(r => !isMatch(r) && isFound(r));
+            case 'NOT_FOUND':  return allRows.filter(r => !isFound(r) && !isNoImagery(r));
+            case 'NO_IMAGERY': return allRows.filter(isNoImagery);
+            case 'SN':         return allRows.filter(isSN);
+            default:           return allRows;
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    function rowClass(r)  { return isMatch(r) ? 'r-match' : !isFound(r) ? 'r-notfound' : 'r-wrong'; }
-    function badgeHtml(r) {
-        if (isMatch(r))  return '<span class="badge b-match">Match</span>';
-        if (!isFound(r)) return '<span class="badge b-notfound">Nao encontrado</span>';
-        return '<span class="badge b-wrong">Update</span>';
+    // ── View toggle ───────────────────────────────────────────────────────────
+    function setView(v) {
+        currentView = v;
+        document.getElementById('vtab-list').classList.toggle('active',    v === 'list');
+        document.getElementById('vtab-grouped').classList.toggle('active', v === 'grouped');
+        document.getElementById('view-list').style.display    = v === 'list'    ? '' : 'none';
+        document.getElementById('view-grouped').style.display = v === 'grouped' ? '' : 'none';
+        document.getElementById('filterTabs').style.display   = v === 'list'    ? 'flex' : 'none';
     }
+
+    // ── Coord grouping ────────────────────────────────────────────────────────
+    function groupByCoords() {
+        const map = new Map();
+        for (const r of allRows) {
+            const key = `${r.LATITUDE}|${r.LONGITUDE}`;
+            if (!map.has(key)) {
+                map.set(key, {
+                    lat: r.LATITUDE, lon: r.LONGITUDE,
+                    prediction: r.PREDICTION, confidence: r.CONFIDENCE,
+                    mapsLink: r.MAPS_LINK || '', coords: r.COORDINATES || '',
+                    hasNoImagery: false, rows: []
+                });
+            }
+            const g = map.get(key);
+            if (isNoImagery(r)) g.hasNoImagery = true;
+            g.rows.push(r);
+        }
+        return [...map.values()].sort((a, b) => b.rows.length - a.rows.length);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function rowClass(r) {
+        if (isNoImagery(r)) return 'r-no-imagery';
+        if (isMatch(r))     return 'r-match';
+        if (!isFound(r))    return 'r-notfound';
+        return 'r-wrong';
+    }
+
+    function badgeHtml(r) {
+        if (isNoImagery(r)) return '<span class="badge b-no-imagery">📷 Sem cobertura</span>';
+        if (isMatch(r))     return '<span class="badge b-match">Match</span>';
+        if (!isFound(r))    return '<span class="badge b-notfound">Nao encontrado</span>';
+        return '<span class="badge b-wrong">Upgrade</span>';
+    }
+
+    function obsTd(r) {
+        const obs = (r.OBSERVATION || '').trim();
+        const nsi = isNoImagery(r);
+        if (!obs && !nsi) return `<td style="color:var(--text-faint)">—</td>`;
+        if (nsi)          return `<td><span class="badge b-no-imagery" title="${obs || 'Sem Street View'}">📷 Sem GSV</span></td>`;
+        return `<td style="font-size:12px;color:var(--text-muted)">${obs}</td>`;
+    }
+
     function confHtml(c) {
         const n = parseInt(c) || 0;
         return `<div class="conf-wrap">
@@ -525,31 +680,115 @@
             <span class="conf-text">${n}%</span>
         </div>`;
     }
+
     function mapHtml(r) {
-        const { LATITUDE: lat, LONGITUDE: lon } = r;
-        if (!lat || !lon) return '—';
-        return `<a class="map-link" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">Ver no mapa &nearr;</a>`;
+        // Prefer pre-built MAPS_LINK column; fall back to constructing from lat/lon
+        if (r.MAPS_LINK && r.MAPS_LINK.startsWith('http')) {
+            return `<a class="map-link" href="${r.MAPS_LINK}" target="_blank">Ver ↗</a>`;
+        }
+        const lat = r.LATITUDE, lon = r.LONGITUDE;
+        if (!lat || !lon) return '<span style="color:var(--text-faint)">—</span>';
+        return `<a class="map-link" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">Ver ↗</a>`;
     }
 
+    function coordsHtml(r) {
+        // Prefer COORDINATES column; fall back to constructing
+        const c = (r.COORDINATES || '').trim();
+        if (c) return `<span class="coords-text">${c}</span>`;
+        const lat = r.LATITUDE, lon = r.LONGITUDE;
+        if (!lat || !lon) return '<span style="color:var(--text-faint)">—</span>';
+        return `<span class="coords-text">${lat}, ${lon}</span>`;
+    }
+
+    function idxTd(n) { return `<td class="idx">${n}</td>`; }
+
+    // ── Main table (list view) ────────────────────────────────────────────────
     function renderMainTable() {
         const rows  = filteredRows();
         const tbody = document.getElementById('tbody1');
         if (!rows.length) {
-            tbody.innerHTML = `<tr class="empty-row"><td colspan="5">Sem resultados nesta categoria.</td></tr>`;
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Sem resultados nesta categoria.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
-            return `<tr class="${rowClass(r)}">
-                <td class="idx">${idx}</td>
+            return `<tr class="${rowClass(r)}">${idxTd(idx)}
                 <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
                 <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
+                ${obsTd(r)}
+                <td>${mapHtml(r)}</td>
+                <td>${coordsHtml(r)}</td>
             </tr>`;
         }).join('');
     }
 
+    // ── Grouped table (by location) ───────────────────────────────────────────
+    function renderGroupedTable() {
+        const groups   = groupByCoords();
+        const tbody    = document.getElementById('tbodyGrouped');
+        const dupCount = groups.filter(g => g.rows.length > 1).length;
+
+        document.getElementById('tcSubGrouped').textContent =
+            `${groups.length} localização${groups.length !== 1 ? 'ões' : ''} única${groups.length !== 1 ? 's' : ''}`;
+
+        const dupWarn = document.getElementById('dupWarn');
+        if (dupCount > 0) {
+            dupWarn.textContent   = `⚠ ${dupCount} com múltiplas portas — OCR redundante no backend`;
+            dupWarn.style.display = 'inline-block';
+        } else {
+            dupWarn.style.display = 'none';
+        }
+
+        if (!groups.length) {
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="7">Sem dados.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = groups.map((g, i) => {
+            const matched  = g.rows.filter(isMatch).length;
+            const upgraded = g.rows.filter(r => !isMatch(r) && isFound(r)).length;
+            const notFound = g.rows.filter(r => !isFound(r) && !isNoImagery(r)).length;
+            const noImg    = g.rows.filter(isNoImagery).length;
+            const isMulti  = g.rows.length > 1;
+
+            const doorsHtml = `<div class="door-badges">${g.rows.map(r => {
+                const cls = isNoImagery(r) ? 'b-no-imagery' : isMatch(r) ? 'b-match' : !isFound(r) ? 'b-notfound' : 'b-wrong';
+                const lbl = isNoImagery(r) ? 'Sem cobertura' : isMatch(r) ? 'Match' : !isFound(r) ? 'Nao encontrado' : 'Upgrade';
+                return `<span class="badge ${cls}" title="${lbl}">${r.NOME_COMPLETO_PORTA || '—'}</span>`;
+            }).join('')}</div>`;
+
+            const coordsDisplay = g.coords || (g.lat && g.lon ? `${g.lat}, ${g.lon}` : '—');
+            const mapLink = g.mapsLink
+                ? `<a class="map-link" href="${g.mapsLink}" target="_blank">Ver ↗</a>`
+                : (g.lat && g.lon ? `<a class="map-link" href="https://www.google.com/maps?q=${g.lat},${g.lon}" target="_blank">Ver ↗</a>` : '—');
+
+            const predCell = g.hasNoImagery && !g.prediction
+                ? `<span class="badge b-no-imagery">📷 Sem cobertura</span>`
+                : `<span class="mono" style="font-weight:400;color:var(--text-muted)">${g.prediction || '—'}</span>`;
+
+            const summaryParts = [];
+            if (matched)  summaryParts.push(`<span class="badge b-match">${matched} ✓</span>`);
+            if (upgraded) summaryParts.push(`<span class="badge b-wrong">${upgraded} ↑</span>`);
+            if (notFound) summaryParts.push(`<span class="badge b-notfound">${notFound} ?</span>`);
+            if (noImg)    summaryParts.push(`<span class="badge b-no-imagery">${noImg} 📷</span>`);
+            const summary  = `<div class="loc-summary">${summaryParts.join('')}</div>`;
+            const multiTag = isMulti ? `&nbsp;<span class="badge b-multi">${g.rows.length}×</span>` : '';
+
+            return `<tr class="${isMulti ? 'r-multi-loc' : ''}">
+                <td class="idx">${i + 1}${multiTag}</td>
+                <td><span class="coords-text">${coordsDisplay}</span></td>
+                <td>${mapLink}</td>
+                <td>${predCell}</td>
+                <td>${confHtml(g.confidence)}</td>
+                <td>${doorsHtml}</td>
+                <td>${summary}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    // ── Non-match table ───────────────────────────────────────────────────────
     function renderNonMatchTable() {
         const rows  = allRows.filter(r => !isMatch(r));
         const tbody = document.getElementById('tbody2');
@@ -557,31 +796,39 @@
             ? `${rows.length} morada${rows.length !== 1 ? 's' : ''} para verificar`
             : 'Nenhuma';
         if (!rows.length) {
-            tbody.innerHTML = `<tr class="empty-row"><td colspan="6">Sem erros registados.</td></tr>`;
+            tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Sem erros registados.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
-            return `<tr class="${rowClass(r)}">
-                <td class="idx">${idx}</td>
+            return `<tr class="${rowClass(r)}">${idxTd(idx)}
                 <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
                 <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
+                ${obsTd(r)}
                 <td>${mapHtml(r)}</td>
+                <td>${coordsHtml(r)}</td>
             </tr>`;
         }).join('');
     }
 
+    // ── Reset ─────────────────────────────────────────────────────────────────
     function reset() {
         if (pollTimer) clearInterval(pollTimer);
-        fileHandle = null; fallbackFile = null; allRows = []; activeFilter = 'ALL';
+        fileHandle = null; fallbackFile = null; allRows = []; activeFilter = 'ALL'; currentView = 'list';
         document.getElementById('upload-screen').style.display = 'flex';
         document.getElementById('dashboard').style.display     = 'none';
         document.getElementById('fileInput').value             = '';
-        document.getElementById('statusBadge').className       = 'status-badge sb-idle';
-        document.getElementById('statusBadge').textContent     = 'Sem ficheiro';
-        document.getElementById('lastUpd').textContent         = '';
+        document.getElementById('view-list').style.display     = '';
+        document.getElementById('view-grouped').style.display  = 'none';
+        document.getElementById('vtab-list').classList.add('active');
+        document.getElementById('vtab-grouped').classList.remove('active');
+        document.getElementById('filterTabs').style.display    = 'flex';
+        const badge = document.getElementById('statusBadge');
+        badge.className   = 'status-badge sb-idle';
+        badge.textContent = 'Sem ficheiro';
+        document.getElementById('lastUpd').textContent = '';
     }
 </script>
 </body>
