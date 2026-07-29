@@ -148,16 +148,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             })
 
         elif parsed.path == "/api/template":
-            if not TEMPLATE_PATH.exists():
-                self._send_json(404, {"error": "Template not found."})
-                return
-            data = TEMPLATE_PATH.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            self._serve_template()
 
         elif parsed.path == "/api/results":
             self._send_json(200, detector.db.get_results(limit=20))
@@ -282,6 +273,37 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         else:
             self._send_json(404, {"error": "Not found"})
 
+    def _serve_template(self):
+        """Serve template_moradas.xlsx with full error handling and flush."""
+        if not TEMPLATE_PATH.exists():
+            _logger.error(f"[template] File not found at: {TEMPLATE_PATH}")
+            self._send_json(404, {"error": f"Template not found: {TEMPLATE_PATH.name}"})
+            return
+
+        try:
+            data = TEMPLATE_PATH.read_bytes()
+        except Exception as exc:
+            _logger.error(f"[template] Cannot read template file: {exc}")
+            self._send_json(500, {"error": f"Cannot read template: {exc}"})
+            return
+
+        if not data:
+            _logger.error(f"[template] Template file is empty: {TEMPLATE_PATH}")
+            self._send_json(500, {"error": "Template file is empty."})
+            return
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.end_headers()
+            self.wfile.write(data)
+            self.wfile.flush()
+        except Exception as exc:
+            _logger.error(f"[template] Error sending template to client: {exc}")
+
     def _serve_html(self, file_path: Path):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -302,6 +324,9 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         return
 
+    def log_error(self, format, *args):
+        _logger.error(f"[http] {format % args}")
+
 
 def create_server(host="0.0.0.0", port=8080):
     return ThreadingHTTPServer((host, port), DoorNumberRequestHandler)
@@ -315,6 +340,8 @@ def main():
     print("=" * 50)
     print(f"Local:    http://127.0.0.1:8080")
     print(f"Network:  http://{local_ip}:8080")
+    print(f"Template: {TEMPLATE_PATH}")
+    print(f"Template exists: {TEMPLATE_PATH.exists()}")
     print("=" * 50)
     print("Press Ctrl+C to stop.")
     try:
