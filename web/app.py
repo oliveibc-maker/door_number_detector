@@ -6,6 +6,7 @@ import sys
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -17,9 +18,8 @@ from core.detector import DoorNumberDetector
 from core.metrics import RunMetrics
 from entrypoint import run_batch_predictions, _query_sqlserver, _run_detection_on_df
 
-WEB_DIR       = Path(__file__).resolve().parent
-HTML_PATH     = WEB_DIR / "templates" / "index.html"
-TEMPLATE_PATH = WEB_DIR / "template_moradas.xlsx"
+WEB_DIR   = Path(__file__).resolve().parent
+HTML_PATH = WEB_DIR / "templates" / "index.html"
 
 # ── Single global detector ─────────────────────────────────────────────────────
 detector = DoorNumberDetector()
@@ -274,22 +274,37 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Not found"})
 
     def _serve_template(self):
-        """Serve template_moradas.xlsx with full error handling and flush."""
-        if not TEMPLATE_PATH.exists():
-            _logger.error(f"[template] File not found at: {TEMPLATE_PATH}")
-            self._send_json(404, {"error": f"Template not found: {TEMPLATE_PATH.name}"})
-            return
-
+        """Generate template_moradas.xlsx on-the-fly with openpyxl — no file path dependency."""
         try:
-            data = TEMPLATE_PATH.read_bytes()
-        except Exception as exc:
-            _logger.error(f"[template] Cannot read template file: {exc}")
-            self._send_json(500, {"error": f"Cannot read template: {exc}"})
-            return
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill
 
-        if not data:
-            _logger.error(f"[template] Template file is empty: {TEMPLATE_PATH}")
-            self._send_json(500, {"error": "Template file is empty."})
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Moradas"
+
+            headers = ["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]
+            ws.append(headers)
+
+            # Bold + light blue header row
+            header_font = Font(bold=True)
+            header_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+            for cell in ws[1]:
+                cell.font = header_font
+                cell.fill = header_fill
+
+            # Auto-width columns
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or "")) for cell in col)
+                ws.column_dimensions[col[0].column_letter].width = max_len + 4
+
+            buf = BytesIO()
+            wb.save(buf)
+            data = buf.getvalue()
+
+        except Exception as exc:
+            _logger.error(f"[template] Failed to generate template: {exc}")
+            self._send_json(500, {"error": f"Cannot generate template: {exc}"})
             return
 
         try:
@@ -297,12 +312,12 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
             self.wfile.flush()
         except Exception as exc:
-            _logger.error(f"[template] Error sending template to client: {exc}")
+            _logger.error(f"[template] Failed to send template to client: {exc}")
 
     def _serve_html(self, file_path: Path):
         self.send_response(200)
@@ -340,8 +355,6 @@ def main():
     print("=" * 50)
     print(f"Local:    http://127.0.0.1:8080")
     print(f"Network:  http://{local_ip}:8080")
-    print(f"Template: {TEMPLATE_PATH}")
-    print(f"Template exists: {TEMPLATE_PATH.exists()}")
     print("=" * 50)
     print("Press Ctrl+C to stop.")
     try:
