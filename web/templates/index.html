@@ -294,14 +294,14 @@
             <div class="upload-card-title">Validação de Moradas</div>
             <div class="upload-card-sub">Seleciona o ficheiro Excel com as moradas.<br>O pipeline corre automaticamente após a submissão.</div>
 
-            <a class="btn-template" href="/api/template" download="template_moradas.xlsx">
+            <button class="btn-template" onclick="downloadTemplate()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                     <polyline points="7 10 12 15 17 10"/>
                     <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
                 Descarregar template Excel
-            </a>
+            </button>
 
             <div class="drop-zone" id="dropZone"
                 onclick="document.getElementById('fileInput').click()"
@@ -545,6 +545,29 @@
 
     function isDashboardVisible() {
         return document.getElementById('dashboard').style.display === 'block';
+    }
+
+    // ── Template download (fetch + blob — bypasses Chrome's HTTP download blocking) ──
+    async function downloadTemplate() {
+        try {
+            const resp = await fetch('/api/template');
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                alert('Erro ao descarregar template: ' + (err.error || 'HTTP ' + resp.status));
+                return;
+            }
+            const blob = await resp.blob();
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = 'template_moradas.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            alert('Erro ao descarregar template: ' + e.message);
+        }
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
