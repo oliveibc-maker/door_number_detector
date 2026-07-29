@@ -1,5 +1,13 @@
-﻿$root = Split-Path -Parent $MyInvocation.MyCommand.Definition
+﻿$root   = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $python = "$root\.venv310\Scripts\python.exe"
+
+if (-not (Test-Path $python)) {
+    Write-Host "ERROR: Python not found at $python" -ForegroundColor Red
+    Write-Host "Make sure the virtual environment is set up at $root\.venv310" -ForegroundColor Yellow
+    pause
+    exit 1
+}
+
 Set-Location $root
 
 $bg = "False"
@@ -13,7 +21,7 @@ if ($bg -eq "True") {
     Write-Host "Starting server in background..." -ForegroundColor Cyan
     $proc = Start-Process `
         -FilePath $python `
-        -ArgumentList "`"$root\web\app.py`"" `
+        -ArgumentList "-u `"$root\web\app.py`"" `
         -WorkingDirectory $root `
         -WindowStyle Hidden `
         -RedirectStandardOutput "$root\server.log" `
@@ -29,5 +37,5 @@ if ($bg -eq "True") {
     }
 } else {
     Write-Host "Starting server in foreground..." -ForegroundColor Cyan
-    & $python "$root\web\app.py"
+    & $python -u "$root\web\app.py"
 }

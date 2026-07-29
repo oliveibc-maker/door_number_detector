@@ -23,7 +23,7 @@ HTML_PATH = WEB_DIR / "templates" / "index.html"
 
 # ── Single global detector ─────────────────────────────────────────────────────
 detector = DoorNumberDetector()
-_logger  = logging.getLogger("core.detector")
+_logger = logging.getLogger("core.detector")
 
 _state = {
     "running":      False,
@@ -274,39 +274,32 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Not found"})
 
     def _serve_template(self):
-        """Generate template_moradas.xlsx on-the-fly with openpyxl — no file path dependency."""
+        """Generate template_moradas.xlsx on-the-fly — no file path dependency."""
+        _logger.info("[template] Request received.")
+
+        # ── Step 1: generate workbook in memory ───────────────────────────────
         try:
             import openpyxl
-            from openpyxl.styles import Font, PatternFill
+            _logger.info(f"[template] openpyxl version: {openpyxl.__version__}")
 
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "Moradas"
-
-            headers = ["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]
-            ws.append(headers)
-
-            # Bold + light blue header row
-            header_font = Font(bold=True)
-            header_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
-            for cell in ws[1]:
-                cell.font = header_font
-                cell.fill = header_fill
-
-            # Auto-width columns
-            for col in ws.columns:
-                max_len = max(len(str(cell.value or "")) for cell in col)
-                ws.column_dimensions[col[0].column_letter].width = max_len + 4
+            ws.append(["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"])
 
             buf = BytesIO()
             wb.save(buf)
-            data = buf.getvalue()
+            buf.seek(0)
+            data = buf.read()
+
+            _logger.info(f"[template] Generated OK — {len(data)} bytes.")
 
         except Exception as exc:
-            _logger.error(f"[template] Failed to generate template: {exc}")
+            _logger.error(f"[template] ERROR generating workbook: {exc}", exc_info=True)
             self._send_json(500, {"error": f"Cannot generate template: {exc}"})
             return
 
+        # ── Step 2: send to client ────────────────────────────────────────────
         try:
             self.send_response(200)
             self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -316,8 +309,10 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             self.wfile.flush()
+            _logger.info("[template] Sent OK.")
+
         except Exception as exc:
-            _logger.error(f"[template] Failed to send template to client: {exc}")
+            _logger.error(f"[template] ERROR sending response: {exc}", exc_info=True)
 
     def _serve_html(self, file_path: Path):
         self.send_response(200)
@@ -350,9 +345,15 @@ def create_server(host="0.0.0.0", port=8080):
 def main():
     server   = create_server()
     local_ip = _get_local_ip()
+    _logger.info("=" * 50)
+    _logger.info("Door Number Detector — Web Server")
+    _logger.info(f"Local:    http://127.0.0.1:8080")
+    _logger.info(f"Network:  http://{local_ip}:8080")
+    _logger.info(f"ROOT_DIR: {ROOT_DIR}")
+    _logger.info(f"WEB_DIR:  {WEB_DIR}")
+    _logger.info("=" * 50)
     print("=" * 50)
     print("Door Number Detector — Web Server")
-    print("=" * 50)
     print(f"Local:    http://127.0.0.1:8080")
     print(f"Network:  http://{local_ip}:8080")
     print("=" * 50)
