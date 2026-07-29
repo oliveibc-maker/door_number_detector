@@ -6,7 +6,6 @@ import sys
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -16,14 +15,15 @@ sys.path.insert(0, str(ROOT_DIR))
 from core.config import Config
 from core.detector import DoorNumberDetector
 from core.metrics import RunMetrics
-from entrypoint import run_batch_predictions, _query_sqlserver, _run_detection_on_df
+from entrypoint import run_batch_predictions, _query_sqlserver, _run_detection_on_df, _read_excel_any
 
-WEB_DIR   = Path(__file__).resolve().parent
-HTML_PATH = WEB_DIR / "templates" / "index.html"
+WEB_DIR       = Path(__file__).resolve().parent
+HTML_PATH     = WEB_DIR / "templates" / "index.html"
+TEMPLATE_PATH = WEB_DIR / "template_moradas.xlsx"
 
 # ── Single global detector ─────────────────────────────────────────────────────
 detector = DoorNumberDetector()
-_logger = logging.getLogger("core.detector")
+_logger  = logging.getLogger("core.detector")
 
 _state = {
     "running":      False,
@@ -48,8 +48,7 @@ def _get_local_ip() -> str:
 
 def _count_excel_rows(path: Path) -> int:
     try:
-        import pandas as pd
-        return len(pd.read_excel(path))
+        return len(_read_excel_any(path))
     except Exception:
         return 0
 
@@ -148,7 +147,16 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             })
 
         elif parsed.path == "/api/template":
-            self._serve_template()
+            if not TEMPLATE_PATH.exists():
+                self._send_json(404, {"error": "Template not found."})
+                return
+            data = TEMPLATE_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
         elif parsed.path == "/api/results":
             self._send_json(200, detector.db.get_results(limit=20))
@@ -273,47 +281,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         else:
             self._send_json(404, {"error": "Not found"})
 
-    def _serve_template(self):
-        """Generate template_moradas.xlsx on-the-fly — no file path dependency."""
-        _logger.info("[template] Request received.")
-
-        # ── Step 1: generate workbook in memory ───────────────────────────────
-        try:
-            import openpyxl
-            _logger.info(f"[template] openpyxl version: {openpyxl.__version__}")
-
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Moradas"
-            ws.append(["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"])
-
-            buf = BytesIO()
-            wb.save(buf)
-            buf.seek(0)
-            data = buf.read()
-
-            _logger.info(f"[template] Generated OK — {len(data)} bytes.")
-
-        except Exception as exc:
-            _logger.error(f"[template] ERROR generating workbook: {exc}", exc_info=True)
-            self._send_json(500, {"error": f"Cannot generate template: {exc}"})
-            return
-
-        # ── Step 2: send to client ────────────────────────────────────────────
-        try:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(data)
-            self.wfile.flush()
-            _logger.info("[template] Sent OK.")
-
-        except Exception as exc:
-            _logger.error(f"[template] ERROR sending response: {exc}", exc_info=True)
-
     def _serve_html(self, file_path: Path):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -334,9 +301,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         return
 
-    def log_error(self, format, *args):
-        _logger.error(f"[http] {format % args}")
-
 
 def create_server(host="0.0.0.0", port=8080):
     return ThreadingHTTPServer((host, port), DoorNumberRequestHandler)
@@ -345,15 +309,9 @@ def create_server(host="0.0.0.0", port=8080):
 def main():
     server   = create_server()
     local_ip = _get_local_ip()
-    _logger.info("=" * 50)
-    _logger.info("Door Number Detector — Web Server")
-    _logger.info(f"Local:    http://127.0.0.1:8080")
-    _logger.info(f"Network:  http://{local_ip}:8080")
-    _logger.info(f"ROOT_DIR: {ROOT_DIR}")
-    _logger.info(f"WEB_DIR:  {WEB_DIR}")
-    _logger.info("=" * 50)
     print("=" * 50)
     print("Door Number Detector — Web Server")
+    print("=" * 50)
     print(f"Local:    http://127.0.0.1:8080")
     print(f"Network:  http://{local_ip}:8080")
     print("=" * 50)
