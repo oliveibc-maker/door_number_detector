@@ -547,27 +547,43 @@
         return document.getElementById('dashboard').style.display === 'block';
     }
 
-    // ── Template download (fetch + blob — bypasses Chrome's HTTP download blocking) ──
-    async function downloadTemplate() {
-        try {
-            const resp = await fetch('/api/template');
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                alert('Erro ao descarregar template: ' + (err.error || 'HTTP ' + resp.status));
-                return;
-            }
-            const blob = await resp.blob();
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement('a');
-            a.href     = url;
-            a.download = 'template_moradas.xlsx';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        } catch (e) {
-            alert('Erro ao descarregar template: ' + e.message);
-        }
+    // ── Template download — pure client-side, no server, no libraries ──────────
+    function downloadTemplate() {
+        // SpreadsheetML (XLS XML) — Excel opens this natively on every machine
+        const xml = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"',
+            '          xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">',
+            '  <Styles>',
+            '    <Style ss:ID="h">',
+            '      <Font ss:Bold="1"/>',
+            '      <Interior ss:Color="#DBEAFE" ss:Pattern="Solid"/>',
+            '    </Style>',
+            '  </Styles>',
+            '  <Worksheet ss:Name="Moradas">',
+            '    <Table>',
+            '      <Column ss:Width="180"/>',
+            '      <Column ss:Width="100"/>',
+            '      <Column ss:Width="100"/>',
+            '      <Row>',
+            '        <Cell ss:StyleID="h"><Data ss:Type="String">NOME_COMPLETO_PORTA</Data></Cell>',
+            '        <Cell ss:StyleID="h"><Data ss:Type="String">LATITUDE</Data></Cell>',
+            '        <Cell ss:StyleID="h"><Data ss:Type="String">LONGITUDE</Data></Cell>',
+            '      </Row>',
+            '    </Table>',
+            '  </Worksheet>',
+            '</Workbook>',
+        ].join('\n');
+
+        const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = 'template_moradas.xls';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
