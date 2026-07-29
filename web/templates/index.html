@@ -71,7 +71,19 @@
             border-radius: 10px; padding: 40px 48px; width: 100%; max-width: 480px; text-align: center;
         }
         .upload-card-title { font-size: 17px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 6px; }
-        .upload-card-sub   { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; line-height: 1.6; }
+        .upload-card-sub   { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.6; }
+
+        .btn-template {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 12px; font-weight: 600; color: var(--primary);
+            background: var(--primary-light); border: 1px solid #bfdbfe;
+            border-radius: 5px; padding: 5px 12px; cursor: pointer;
+            text-decoration: none; margin-bottom: 18px;
+            transition: background .15s, border-color .15s;
+            font-family: var(--font);
+        }
+        .btn-template:hover { background: #dbeafe; border-color: #93c5fd; }
+        .btn-template svg   { flex-shrink: 0; }
 
         .drop-zone {
             border: 1.5px dashed var(--border); border-radius: 8px; padding: 28px 24px;
@@ -142,55 +154,21 @@
         .kpi-value { font-size: 30px; font-weight: 800; color: var(--text); line-height: 1; letter-spacing: -.04em; }
         .kpi-sub   { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
 
-        /* ── Live Metrics Panel ───────────────────────────────────────────── */
-        .metrics-panel {
-            background: #0f172a; border-radius: 8px; padding: 14px 18px;
-        }
-        .metrics-header {
-            display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
-        }
-        .metrics-title {
-            font-size: 11px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: .08em; color: #475569;
-        }
-        .live-pill {
-            display: flex; align-items: center; gap: 5px;
-            background: #1e293b; border-radius: 20px; padding: 2px 8px;
-        }
-        .live-dot {
-            width: 6px; height: 6px; border-radius: 50%; background: #475569;
-            flex-shrink: 0; transition: background .3s;
-        }
+        .metrics-panel { background: #0f172a; border-radius: 8px; padding: 14px 18px; }
+        .metrics-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .metrics-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #475569; }
+        .live-pill { display: flex; align-items: center; gap: 5px; background: #1e293b; border-radius: 20px; padding: 2px 8px; }
+        .live-dot { width: 6px; height: 6px; border-radius: 50%; background: #475569; flex-shrink: 0; transition: background .3s; }
         .live-dot.active { background: #22c55e; animation: pulse-dot 1.4s ease-in-out infinite; }
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; }
-            50%       { opacity: 0.25; }
-        }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
         .live-label { font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .06em; }
         .live-label.active { color: #22c55e; }
-
-        .metrics-grid {
-            display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
-        }
-        .metric-item {
-            background: #1e293b; border-radius: 6px; padding: 11px 14px;
-        }
-        .metric-label {
-            font-size: 10px; font-weight: 600; text-transform: uppercase;
-            letter-spacing: .06em; color: #475569; margin-bottom: 5px; line-height: 1.3;
-        }
-        .metric-value {
-            font-size: 20px; font-weight: 800; color: #f1f5f9; line-height: 1;
-            letter-spacing: -.03em;
-        }
+        .metrics-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+        .metric-item { background: #1e293b; border-radius: 6px; padding: 11px 14px; }
+        .metric-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #475569; margin-bottom: 5px; line-height: 1.3; }
+        .metric-value { font-size: 20px; font-weight: 800; color: #f1f5f9; line-height: 1; letter-spacing: -.03em; }
         .metric-value.highlight { color: #93c5fd; }
-        .metric-sub {
-            font-size: 10px; color: #334155; margin-top: 3px;
-        }
-        .metrics-note {
-            font-size: 10px; color: #1e293b; margin-top: 8px; text-align: right;
-        }
-        /* ── end metrics panel ───────────────────────────────────────────── */
+        .metric-sub { font-size: 10px; color: #334155; margin-top: 3px; }
 
         .acc {
             background: var(--primary); border-radius: 8px; padding: 18px 24px;
@@ -204,7 +182,7 @@
         .acc-right .acc-value { font-size: 20px; }
 
         .table-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-        .tc-header  {
+        .tc-header {
             padding: 11px 16px; border-bottom: 1px solid var(--border);
             display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
         }
@@ -220,7 +198,7 @@
         .vtab.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 
         .tabs { display: flex; gap: 2px; flex-wrap: wrap; }
-        .tab  {
+        .tab {
             padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer;
             font-family: var(--font); font-size: 12px; font-weight: 500;
             background: none; color: var(--text-muted); transition: all .12s;
@@ -232,13 +210,10 @@
             padding: 7px 16px; background: #f8fafc; border-bottom: 1px solid var(--border);
             display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
         }
-        .dup-warn {
-            font-size: 11px; font-weight: 600; color: #5b21b6;
-            background: #ede9fe; padding: 2px 10px; border-radius: 3px;
-        }
+        .dup-warn { font-size: 11px; font-weight: 600; color: #5b21b6; background: #ede9fe; padding: 2px 10px; border-radius: 3px; }
 
         table { width: 100%; border-collapse: collapse; }
-        th    {
+        th {
             font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
             color: var(--text-muted); padding: 9px 14px; background: #f8fafc;
             border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap;
@@ -287,19 +262,9 @@
         .empty-row td { text-align: center; padding: 28px; color: var(--text-faint); font-size: 13px; }
         .idx { color: var(--text-faint); font-size: 11px; font-family: ui-monospace, monospace; }
 
-        @media (max-width: 1100px) {
-            .metrics-grid { grid-template-columns: repeat(3, 1fr); }
-        }
-        @media (max-width: 900px) {
-            .kpi-row      { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
-            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 680px) {
-            .kpi-row      { grid-template-columns: 1fr 1fr; }
-            .metrics-grid { grid-template-columns: 1fr 1fr; }
-            main { padding: 1rem; }
-            .upload-card { padding: 28px 24px; }
-        }
+        @media (max-width: 1100px) { .metrics-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 900px)  { .kpi-row { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); } .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 680px)  { .kpi-row { grid-template-columns: 1fr 1fr; } .metrics-grid { grid-template-columns: 1fr 1fr; } main { padding: 1rem; } .upload-card { padding: 28px 24px; } }
     </style>
 </head>
 <body>
@@ -328,6 +293,16 @@
         <div class="upload-card">
             <div class="upload-card-title">Validação de Moradas</div>
             <div class="upload-card-sub">Seleciona o ficheiro Excel com as moradas.<br>O pipeline corre automaticamente após a submissão.</div>
+
+            <a class="btn-template" href="/api/template" download="template_moradas.xlsx">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Descarregar template Excel
+            </a>
+
             <div class="drop-zone" id="dropZone"
                 onclick="document.getElementById('fileInput').click()"
                 ondragover="onDragOver(event)"
@@ -370,10 +345,8 @@
     <!-- ══ DASHBOARD ══ -->
     <div id="dashboard">
 
-        <!-- Error banner -->
         <div id="errorBanner" style="display:none;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:13px 18px;color:#b91c1c;font-size:13px;font-weight:500;margin-bottom:16px;"></div>
 
-        <!-- Progress strip -->
         <div class="section">
             <div class="progress-strip">
                 <span class="source-badge" id="sourceBadge" style="display:none"></span>
@@ -384,7 +357,6 @@
             </div>
         </div>
 
-        <!-- KPI row -->
         <div class="section kpi-row">
             <div class="kpi">
                 <div class="kpi-label">Total Processado</div>
@@ -412,7 +384,6 @@
             </div>
         </div>
 
-        <!-- ══ LIVE METRICS PANEL ══ -->
         <div class="section" id="metricsSection" style="display:none">
             <div class="metrics-panel">
                 <div class="metrics-header">
@@ -452,7 +423,6 @@
             </div>
         </div>
 
-        <!-- Accuracy bar -->
         <div class="section">
             <div class="acc">
                 <div>
@@ -467,7 +437,6 @@
             </div>
         </div>
 
-        <!-- ══ MAIN TABLE CARD ══ -->
         <div class="section">
             <div class="table-card">
                 <div class="tc-header">
@@ -484,7 +453,6 @@
                     </div>
                 </div>
 
-                <!-- List view -->
                 <div id="view-list" style="overflow-x:auto">
                     <table>
                         <thead>
@@ -503,7 +471,6 @@
                     </table>
                 </div>
 
-                <!-- Grouped view -->
                 <div id="view-grouped" style="display:none">
                     <div class="grouped-info-bar">
                         <span class="tc-sub" id="tcSubGrouped">—</span>
@@ -567,7 +534,6 @@
 </main>
 
 <script>
-    // ── State ─────────────────────────────────────────────────────────────────
     let excelFile    = null;
     let allRows      = [];
     let activeFilter = 'ALL';
@@ -581,7 +547,6 @@
         return document.getElementById('dashboard').style.display === 'block';
     }
 
-    // ── Boot ──────────────────────────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', async () => {
         _applyTabUI(currentTab);
         try {
@@ -612,7 +577,6 @@
         document.getElementById('sql-form').style.display   = tab === 'sql'   ? 'flex' : 'none';
     }
 
-    // ── File selection ────────────────────────────────────────────────────────
     function onFileChange(e) { const f = e.target.files?.[0]; if (f) setFile(f); }
     function onDragOver(e)   { e.preventDefault(); document.getElementById('dropZone').classList.add('over'); }
     function onDragLeave()   { document.getElementById('dropZone').classList.remove('over'); }
@@ -636,7 +600,6 @@
         document.getElementById('btnSql').disabled = !val;
     }
 
-    // ── Upload & run (Excel) ──────────────────────────────────────────────────
     async function uploadAndRun() {
         if (!excelFile) return;
         const btn = document.getElementById('btnRun');
@@ -658,7 +621,6 @@
         }
     }
 
-    // ── Run SQL Server ────────────────────────────────────────────────────────
     async function runSqlServer() {
         const filterBy    = document.getElementById('filterBy').value;
         const filterValue = document.getElementById('filterValue').value.trim();
@@ -683,7 +645,6 @@
         }
     }
 
-    // ── Dashboard control ─────────────────────────────────────────────────────
     function showDashboard() {
         document.getElementById('excel-form').style.display = 'none';
         document.getElementById('sql-form').style.display   = 'none';
@@ -729,7 +690,6 @@
         document.getElementById('sourceBadge').style.display = 'none';
     }
 
-    // ── View toggle ───────────────────────────────────────────────────────────
     function setView(v) {
         currentView = v;
         document.getElementById('vtab-list').classList.toggle('active',    v === 'list');
@@ -739,7 +699,6 @@
         document.getElementById('filterTabs').style.display   = v === 'list'    ? 'flex' : 'none';
     }
 
-    // ── Polling ───────────────────────────────────────────────────────────────
     function startPolling() {
         if (pollTimer) clearInterval(pollTimer);
         poll();
@@ -763,9 +722,7 @@
         return r.json();
     }
 
-    // ── Data application ──────────────────────────────────────────────────────
     function applyData(data) {
-        // Error banner
         const eb = document.getElementById('errorBanner');
         if (data.error && !data.running) {
             eb.textContent   = '❌ Erro: ' + data.error;
@@ -811,38 +768,25 @@
         document.getElementById('accFill').style.width  = effPct + '%';
         document.getElementById('tcSub1').textContent   = `${total} registo${total !== 1 ? 's' : ''}`;
 
-        // ── Live metrics panel ────────────────────────────────────────────────
         const m = data.metrics;
         const metricsSection = document.getElementById('metricsSection');
         if (m && m.n_total > 0) {
             metricsSection.style.display = '';
             const cur = m.currency || '€';
-
-            // Time
-            document.getElementById('mAvgTime').textContent  = m.avg_time_per_detection_s + 's';
+            document.getElementById('mAvgTime').textContent   = m.avg_time_per_detection_s + 's';
             document.getElementById('mTotalTime').textContent = 'Total: ' + fmtDuration(m.total_time_s);
-            document.getElementById('mMinMax').textContent   = m.min_time_s + 's / ' + m.max_time_s + 's';
-
-            // API calls
+            document.getElementById('mMinMax').textContent    = m.min_time_s + 's / ' + m.max_time_s + 's';
             document.getElementById('mAvgCalls').textContent  = m.avg_image_calls_per_detection;
             document.getElementById('mTotalCalls').textContent = 'Total: ' + m.total_image_api_calls + ' chamadas';
-
-            // Cost
             document.getElementById('mTotalCost').textContent = cur + m.total_cost.toFixed(4);
             document.getElementById('mAvgCost').textContent   = cur + m.avg_cost_per_detection.toFixed(4);
             document.getElementById('mCostBasis').textContent = cur + m.cost_per_image_call.toFixed(4) + ' / chamada';
-
-            // Live indicator
             const dot   = document.getElementById('liveDot');
             const label = document.getElementById('liveLabel');
             if (data.running) {
-                dot.classList.add('active');
-                label.textContent = 'Em direto';
-                label.classList.add('active');
+                dot.classList.add('active'); label.textContent = 'Em direto'; label.classList.add('active');
             } else {
-                dot.classList.remove('active');
-                label.textContent = 'Concluído';
-                label.classList.remove('active');
+                dot.classList.remove('active'); label.textContent = 'Concluído'; label.classList.remove('active');
             }
         } else {
             metricsSection.style.display = 'none';
@@ -861,14 +805,12 @@
         return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
     }
 
-    // ── Predicates ────────────────────────────────────────────────────────────
     const isMatch     = r => /^(true|yes|✓)/i.test((r.MATCH || '').trim());
     const isFound     = r => /^yes$/i.test((r.PREDICTION_FOUND || '').trim());
     const isNoImagery = r => (r.PREDICTION_FOUND || '').trim().toUpperCase() === 'NO_IMAGERY';
     const isSN        = r => (r.NOME_COMPLETO_PORTA || '').trim().toUpperCase() === 'SN';
     const pct         = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '—';
 
-    // ── Filter tabs ───────────────────────────────────────────────────────────
     function renderFilterTabs(total, matched, wrong, notFound, sn, noImagery) {
         const tabs = [
             { id: 'ALL',        label: `Todos (${total})`                 },
@@ -904,7 +846,6 @@
         }
     }
 
-    // ── Coord grouping ────────────────────────────────────────────────────────
     function groupByCoords() {
         const map = new Map();
         for (const r of allRows) {
@@ -919,7 +860,6 @@
         return [...map.values()].sort((a, b) => b.rows.length - a.rows.length);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     function rowClass(r) {
         if (isNoImagery(r)) return 'r-no-imagery';
         if (isMatch(r))     return 'r-match';
@@ -953,7 +893,6 @@
     }
     function idxTd(n) { return `<td class="idx">${n}</td>`; }
 
-    // ── Main table (list view) ────────────────────────────────────────────────
     function renderMainTable() {
         const rows  = filteredRows();
         const tbody = document.getElementById('tbody1');
@@ -975,7 +914,6 @@
         }).join('');
     }
 
-    // ── Grouped table (by location) ───────────────────────────────────────────
     function renderGroupedTable() {
         const groups   = groupByCoords();
         const tbody    = document.getElementById('tbodyGrouped');
@@ -1024,8 +962,7 @@
             if (upgraded) summaryParts.push(`<span class="badge b-wrong">${upgraded} ↑</span>`);
             if (notFound) summaryParts.push(`<span class="badge b-notfound">${notFound} ?</span>`);
             if (noImg)    summaryParts.push(`<span class="badge b-no-imagery">${noImg} 📷</span>`);
-            const summary = `<div class="loc-summary">${summaryParts.join('')}</div>`;
-
+            const summary  = `<div class="loc-summary">${summaryParts.join('')}</div>`;
             const multiTag = isMulti ? `&nbsp;<span class="badge b-multi">${g.rows.length}×</span>` : '';
 
             return `<tr class="${isMulti ? 'r-multi-loc' : ''}">
@@ -1040,7 +977,6 @@
         }).join('');
     }
 
-    // ── Non-match table ───────────────────────────────────────────────────────
     function renderNonMatchTable() {
         const rows  = allRows.filter(r => !isMatch(r));
         const tbody = document.getElementById('tbody2');
@@ -1065,7 +1001,6 @@
         }).join('');
     }
 
-    // ── Status badge ──────────────────────────────────────────────────────────
     function setStatusBadge(s) {
         const el  = document.getElementById('statusBadge');
         const map = { idle: ['sb-idle','Inativo'], running: ['sb-running','A correr'], done: ['sb-done','Concluido'], error: ['sb-error','Erro'] };
@@ -1075,4 +1010,3 @@
 </script>
 </body>
 </html>
-

@@ -17,8 +17,9 @@ from core.detector import DoorNumberDetector
 from core.metrics import RunMetrics
 from entrypoint import run_batch_predictions, _query_sqlserver, _run_detection_on_df
 
-WEB_DIR   = Path(__file__).resolve().parent
-HTML_PATH = WEB_DIR / "templates" / "index.html"
+WEB_DIR       = Path(__file__).resolve().parent
+HTML_PATH     = WEB_DIR / "templates" / "index.html"
+TEMPLATE_PATH = WEB_DIR / "template_moradas.xlsx"
 
 # ── Single global detector ─────────────────────────────────────────────────────
 detector = DoorNumberDetector()
@@ -30,7 +31,7 @@ _state = {
     "total":        0,
     "error":        None,
     "cancel_event": None,
-    "metrics":      None,   # RunMetrics instance — live, readable at any time
+    "metrics":      None,
 }
 
 
@@ -60,7 +61,6 @@ def _new_cancel_event() -> threading.Event:
 
 
 def _save_metrics(metrics: RunMetrics, csv_path: Path) -> None:
-    """Persist metrics JSON alongside the output CSV."""
     try:
         metrics_path = csv_path.with_suffix(".metrics.json")
         metrics.save_json(metrics_path)
@@ -136,11 +136,8 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/api/status":
             rows = _read_csv()
-
-            # Live metrics snapshot — safe to call from any thread at any time
             m = _state.get("metrics")
             metrics_summary = m.summary() if m else None
-
             self._send_json(200, {
                 "running":   _state["running"],
                 "total":     _state["total"],
@@ -149,6 +146,18 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 "rows":      rows,
                 "metrics":   metrics_summary,
             })
+
+        elif parsed.path == "/api/template":
+            if not TEMPLATE_PATH.exists():
+                self._send_json(404, {"error": "Template not found."})
+                return
+            data = TEMPLATE_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
         elif parsed.path == "/api/results":
             self._send_json(200, detector.db.get_results(limit=20))
@@ -160,7 +169,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
-        # ── Reset / cancel ────────────────────────────────────────────────────
         if parsed.path == "/api/reset":
             ev = _state.get("cancel_event")
             if ev is not None:
@@ -175,7 +183,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             })
             self._send_json(200, {"status": "reset"})
 
-        # ── Excel upload ──────────────────────────────────────────────────────
         elif parsed.path == "/api/upload":
             if _state["running"]:
                 self._send_json(409, {"error": "Pipeline already running."})
@@ -201,7 +208,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
             csv_path = ROOT_DIR / f"predictions_{ts}.csv"
 
-            metrics = RunMetrics()   # ← fresh instance for this batch
+            metrics = RunMetrics()
             _state.update({
                 "running":  True,
                 "error":    None,
@@ -219,7 +226,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
-        # ── SQL Server batch ──────────────────────────────────────────────────
         elif parsed.path == "/api/run_sqlserver":
             if _state["running"]:
                 self._send_json(409, {"error": "Pipeline already running."})
@@ -241,7 +247,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             safe_name = filter_value.replace(" ", "_")
             csv_path  = ROOT_DIR / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
 
-            metrics = RunMetrics()   # ← fresh instance for this batch
+            metrics = RunMetrics()
             _state.update({
                 "running":  True,
                 "error":    None,
@@ -259,7 +265,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
-        # ── Single coordinate analysis ────────────────────────────────────────
         elif parsed.path == "/api/analyze":
             length = int(self.headers.get("Content-Length", "0"))
             body   = self.rfile.read(length).decode("utf-8")

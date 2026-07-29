@@ -60,7 +60,6 @@ _DOOR_NUMBER_RE = re.compile(r"[A-Za-z]?\d{1,4}[A-Za-z]?")
 _BLOCKLIST: set[str] = {
     "2024G", "2023G", "2022G", "2025G", "2026G",
     "G000", "G001", "G002", "G003", "G004",
-    "2024", "2025",
 }
 
 
