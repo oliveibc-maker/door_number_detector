@@ -197,7 +197,10 @@ To inspect an existing CSV without starting the server, open `web/templates/resu
 │   ├── database.py               # SQLite result persistence
 │   ├── detector.py               # PaddleOCR detection workflow
 │   ├── google_street_view.py     # Street View API client
-│   └── metrics.py                # Run-level performance and cost metrics
+│   ├── metrics.py                # Run-level performance and cost metrics
+│   └── sources/                  # Excel and SQL Server input adapters
+│       ├── excel.py
+│       └── sqlserver.py
 ├── web/
 │   ├── app.py                    # Authenticated loopback HTTP server
 │   ├── healthcheck.py            # Container readiness check

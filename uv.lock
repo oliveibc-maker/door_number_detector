@@ -331,6 +331,14 @@ dependencies = [
     { name = "xlrd" },
 ]
 
+[package.dev-dependencies]
+test = [
+    { name = "defusedxml" },
+    { name = "openpyxl" },
+    { name = "pandas" },
+    { name = "python-dotenv" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "defusedxml", specifier = "==0.7.1" },
@@ -347,6 +355,14 @@ requires-dist = [
     { name = "setuptools", specifier = "==81.0.0" },
     { name = "sqlalchemy", specifier = "==2.0.51" },
     { name = "xlrd", specifier = "==2.0.1" },
+]
+
+[package.metadata.requires-dev]
+test = [
+    { name = "defusedxml", specifier = "==0.7.1" },
+    { name = "openpyxl", specifier = "==3.1.5" },
+    { name = "pandas", specifier = "==2.3.3" },
+    { name = "python-dotenv", specifier = "==1.2.2" },
 ]
 
 [[package]]

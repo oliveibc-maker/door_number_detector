@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT_DIR))
 from core.config import Config
 from core.detector import DoorNumberDetector
 from core.metrics import RunMetrics
-from entrypoint import run_batch_predictions, _query_sqlserver, _run_detection_on_df, _read_excel_any
+from core.sources import query_sqlserver, read_excel_any
+from entrypoint import run_batch_predictions, _run_detection_on_df
 from web.security import (
     UploadTooLarge,
     is_loopback_host,
@@ -139,7 +140,7 @@ def _run_sqlserver_batch(
     error = None
     try:
         config = Config()
-        df = _query_sqlserver(filter_by, filter_value, config)
+        df = query_sqlserver(filter_by, filter_value, config)
         with _state_lock:
             if _state.get("cancel_event") is cancel_event:
                 _state["total"] = len(df)
@@ -312,7 +313,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
                 with excel_path.open("xb") as uploaded_file:
                     uploaded_file.write(data)
-                workbook = _read_excel_any(excel_path)
+                workbook = read_excel_any(excel_path)
                 required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
                 if workbook.empty or not required_columns.issubset(workbook.columns):
                     excel_path.unlink(missing_ok=True)

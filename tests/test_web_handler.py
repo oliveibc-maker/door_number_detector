@@ -15,6 +15,7 @@ from http.server import ThreadingHTTPServer
 def _load_app_with_stubs():
     detector_module = types.ModuleType("core.detector")
     metrics_module = types.ModuleType("core.metrics")
+    sources_module = types.ModuleType("core.sources")
     entrypoint_module = types.ModuleType("entrypoint")
 
     class Detector:
@@ -37,14 +38,15 @@ def _load_app_with_stubs():
 
     detector_module.DoorNumberDetector = Detector
     metrics_module.RunMetrics = Metrics
+    sources_module.query_sqlserver = lambda *args, **kwargs: None
+    sources_module.read_excel_any = lambda path: Workbook()
     entrypoint_module.run_batch_predictions = lambda *args, **kwargs: None
-    entrypoint_module._query_sqlserver = lambda *args, **kwargs: None
     entrypoint_module._run_detection_on_df = lambda *args, **kwargs: None
-    entrypoint_module._read_excel_any = lambda path: Workbook()
 
     with patch.dict(sys.modules, {
         "core.detector": detector_module,
         "core.metrics": metrics_module,
+        "core.sources": sources_module,
         "entrypoint": entrypoint_module,
     }):
         return importlib.import_module("web.app")

@@ -29,6 +29,14 @@ dependencies = [
 door-number-detector = "entrypoint:main"
 door-number-detector-web = "web.app:main"
 
+[dependency-groups]
+test = [
+    "defusedxml==0.7.1",
+    "openpyxl==3.1.5",
+    "pandas==2.3.3",
+    "python-dotenv==1.2.2",
+]
+
 [tool.setuptools]
 py-modules = ["entrypoint"]
 include-package-data = true
