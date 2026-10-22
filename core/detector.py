@@ -50,17 +50,7 @@ logger = _build_logger()
 
 # ── Door number patterns ───────────────────────────────────────────────────────
 
-_KEYWORD_RE = re.compile(
-    r"\b(LOTE|LOT|SECTOR|SEC|BLOCO|BL|APARTAMENTO|APT|FRACCAO|FRACAO)\s*(\d{1,4})\b",
-    re.IGNORECASE,
-)
-
-_DOOR_NUMBER_RE = re.compile(r"[A-Za-z]?\d{1,4}[A-Za-z]?")
-
-_BLOCKLIST: set[str] = {
-    "2024G", "2023G", "2022G", "2025G", "2026G",
-    "G000", "G001", "G002", "G003", "G004",
-}
+from core.parsing import BLOCKLIST, parse_ocr_text
 
 
 class DoorNumberDetector:
@@ -106,10 +96,6 @@ class DoorNumberDetector:
         return cv2.resize(image, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
 
     @staticmethod
-    def _is_leading_zero(num: str) -> bool:
-        return bool(re.match(r"0\d", num))
-
-    @staticmethod
     def _is_year_like(num: str) -> bool:
         return bool(
             re.fullmatch(r"202", num)      or
@@ -132,28 +118,6 @@ class DoorNumberDetector:
     def _is_bad_candidate(self, num: str) -> bool:
         return self._is_year_like(num) or self._is_suspicious_short(num)
 
-    def _parse_ocr_text(self, text: str) -> list[str]:
-        upper = text.strip().upper()
-
-        keyword_hits = _KEYWORD_RE.findall(upper)
-        if keyword_hits:
-            combined = "-".join(f"{kw}{num}" for kw, num in keyword_hits)
-            if combined in _BLOCKLIST:
-                logger.info(f"OCR: blocked keyword fragment '{combined}'")
-                return []
-            return [combined]
-
-        results = []
-        for num in _DOOR_NUMBER_RE.findall(upper):
-            if self._is_leading_zero(num):
-                logger.info(f"OCR: skipped leading-zero fragment '{num}'")
-                continue
-            if num in _BLOCKLIST:
-                logger.info(f"OCR: blocked fragment '{num}' (blocklist)")
-                continue
-            results.append(num)
-        return results
-
     def _extract_door_number(self, image: Image.Image) -> tuple[str | None, int]:
         cv_img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
@@ -175,7 +139,7 @@ class DoorNumberDetector:
             normalized_results = []
             for line in page:
                 bbox, (text, conf) = line
-                for num in self._parse_ocr_text(text):
+                for num in parse_ocr_text(text, logger.info):
                     all_candidates.append((num, conf))
                     logger.info(f"PaddleOCR [{tag}] '{num}' <- '{text}' ({conf * 100:.0f}%)")
                 normalized_results.append((bbox, text, conf))
@@ -470,7 +434,7 @@ class DoorNumberDetector:
                         if c["number"]
                         and c["number"] != door_number
                         and not self._is_bad_candidate(c["number"])
-                        and c["number"] not in _BLOCKLIST
+                        and c["number"] not in BLOCKLIST
                         and c["confidence"] >= self.config.confidence_threshold
                     ),
                     None,
@@ -494,7 +458,7 @@ class DoorNumberDetector:
                             if c["number"]
                             and c["number"] != door_number
                             and self._is_suspicious_short(c["number"])
-                            and c["number"] not in _BLOCKLIST
+                            and c["number"] not in BLOCKLIST
                             and c["confidence"] >= self.config.confidence_threshold
                         ),
                         None,
