@@ -13,14 +13,9 @@ from http.server import ThreadingHTTPServer
 
 
 def _load_app_with_stubs():
-    detector_module = types.ModuleType("core.detector")
     metrics_module = types.ModuleType("core.metrics")
     batch_module = types.ModuleType("core.batch")
     sources_module = types.ModuleType("core.sources")
-
-    class Detector:
-        def __init__(self):
-            self.db = types.SimpleNamespace(get_results=lambda limit: [])
 
     class Metrics:
         def summary(self):
@@ -36,7 +31,6 @@ def _load_app_with_stubs():
         def __len__(self):
             return 1
 
-    detector_module.DoorNumberDetector = Detector
     metrics_module.RunMetrics = Metrics
     batch_module.run_detection_batch = lambda *args, **kwargs: None
     batch_module.run_excel_batch = lambda *args, **kwargs: None
@@ -44,7 +38,6 @@ def _load_app_with_stubs():
     sources_module.read_excel_any = lambda path: Workbook()
 
     with patch.dict(sys.modules, {
-        "core.detector": detector_module,
         "core.metrics": metrics_module,
         "core.batch": batch_module,
         "core.sources": sources_module,
@@ -60,6 +53,12 @@ class WebHandlerTests(unittest.TestCase):
 
     def setUp(self):
         self.upload_dir = tempfile.TemporaryDirectory()
+        self.original_detector = self.app._detector
+        self.app._detector = types.SimpleNamespace(
+            db=types.SimpleNamespace(get_results=lambda limit: []),
+            detect_door_number=lambda *args, **kwargs: {},
+            close=lambda: None,
+        )
         self.original_upload_dir = self.app.UPLOAD_DIR
         self.original_output_dir = self.app.OUTPUT_DIR
         self.app.UPLOAD_DIR = Path(self.upload_dir.name)
@@ -90,6 +89,7 @@ class WebHandlerTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.server_thread.join()
+        self.app._detector = self.original_detector
         self.app.UPLOAD_DIR = self.original_upload_dir
         self.app.OUTPUT_DIR = self.original_output_dir
         self.upload_dir.cleanup()
@@ -123,7 +123,7 @@ class WebHandlerTests(unittest.TestCase):
 
     def test_analysis_errors_return_generic_json_and_release_the_job_slot(self):
         with patch.object(
-            self.app.detector,
+            self.app._detector,
             "detect_door_number",
             side_effect=RuntimeError("internal detail"),
             create=True,
@@ -141,6 +141,30 @@ class WebHandlerTests(unittest.TestCase):
         self.assertIn(b"Detection failed", body)
         self.assertNotIn(b"internal detail", body)
         self.assertFalse(self.app._state["running"])
+
+    def test_detector_factory_is_lazy_and_constructs_once(self):
+        self.assertIsNone(self.original_detector)
+        self.app._detector = None
+        detector_module = types.ModuleType("core.detector")
+        created = []
+
+        class LazyDetector:
+            pass
+
+        def build_detector():
+            instance = LazyDetector()
+            created.append(instance)
+            return instance
+
+        detector_module.DoorNumberDetector = build_detector
+        try:
+            with patch.dict(sys.modules, {"core.detector": detector_module}):
+                first = self.app.get_detector()
+                second = self.app.get_detector()
+            self.assertIs(first, second)
+            self.assertEqual(len(created), 1)
+        finally:
+            self.app._detector = self.original_detector
 
     def test_html_receives_runtime_csrf_token_and_upload_limit(self):
         status, body = self._request("GET", "/")

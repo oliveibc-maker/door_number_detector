@@ -56,30 +56,53 @@ from core.parsing import BLOCKLIST, parse_ocr_text
 class DoorNumberDetector:
     """Detects door numbers using Google Street View images and PaddleOCR."""
 
-    def __init__(self, env_path=".env"):
-        self.config = Config(env_path)
+    def __init__(
+        self,
+        env_path=".env",
+        *,
+        config=None,
+        database_manager=None,
+        street_view_fetcher=None,
+        ocr_engine=None,
+        debug_root: Path | None = None,
+    ):
+        self.config = config if config is not None else Config(env_path)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.debug_root = self.config.data_dir / "ocr_debug"
+        self.debug_root = (
+            Path(debug_root)
+            if debug_root is not None
+            else self.config.data_dir / "ocr_debug"
+        )
         self.debug_root.mkdir(parents=True, exist_ok=True)
         self.debug_dir = self.debug_root / ts
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.current_debug_house_dir: Path | None = None
-        self.db = DatabaseManager(self.config)
-        self.street_view = StreetViewFetcher(
-            self.config.google_api_key,
-            size=self.config.street_view_size,
-            https_proxy=self.config.https_proxy,
+        self.db = (
+            database_manager
+            if database_manager is not None
+            else DatabaseManager(self.config)
+        )
+        self.street_view = (
+            street_view_fetcher
+            if street_view_fetcher is not None
+            else StreetViewFetcher(
+                self.config.google_api_key,
+                size=self.config.street_view_size,
+                https_proxy=self.config.https_proxy,
+            )
         )
 
-        logger.info("Loading PaddleOCR model (first run downloads models)...")
-        self._paddle_reader = PaddleOCR(
-            lang="en",
-            use_angle_cls=True,
-            use_gpu=False,
-            show_log=False,
-            det_db_thresh=0.2,
-            det_db_box_thresh=0.4,
-        )
+        if ocr_engine is None:
+            logger.info("Loading PaddleOCR model (first run downloads models)...")
+            ocr_engine = PaddleOCR(
+                lang="en",
+                use_angle_cls=True,
+                use_gpu=False,
+                show_log=False,
+                det_db_thresh=0.2,
+                det_db_box_thresh=0.4,
+            )
+        self._paddle_reader = ocr_engine
         logger.info("Door Number Detector initialized (OCR engine: PaddleOCR)")
 
     def _save_debug_image(self, image, name, directory: Path | None = None):

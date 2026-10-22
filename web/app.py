@@ -19,7 +19,6 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from core.config import Config
-from core.detector import DoorNumberDetector
 from core.metrics import RunMetrics
 from core.batch import run_detection_batch, run_excel_batch
 from core.sources import query_sqlserver, read_excel_any
@@ -38,9 +37,21 @@ DATA_DIR      = Config().data_dir
 UPLOAD_DIR    = DATA_DIR / "uploads"
 OUTPUT_DIR    = DATA_DIR / "outputs"
 
-# ── Single global detector ─────────────────────────────────────────────────────
-detector = DoorNumberDetector()
+# ── Lazy single detector ───────────────────────────────────────────────────────
+_detector = None
+_detector_lock = threading.Lock()
 _logger  = logging.getLogger("core.detector")
+
+
+def get_detector():
+    global _detector
+    if _detector is None:
+        with _detector_lock:
+            if _detector is None:
+                from core.detector import DoorNumberDetector
+
+                _detector = DoorNumberDetector()
+    return _detector
 
 _state = {
     "running":      False,
@@ -114,7 +125,7 @@ def _run_batch(excel_path: Path, csv_path: Path, cancel_event: threading.Event, 
     try:
         run_excel_batch(
             excel_path, csv_path,
-            detector_instance=detector,
+            detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
         )
@@ -146,7 +157,7 @@ def _run_sqlserver_batch(
                 _state["total"] = len(df)
         run_detection_batch(
             df, csv_path, set(),
-            detector_instance=detector,
+            detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
         )
@@ -265,7 +276,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             })
 
         elif parsed.path == "/api/results":
-            self._send_json(200, detector.db.get_results(limit=20))
+            self._send_json(200, get_detector().db.get_results(limit=20))
 
         else:
             self._send_json(404, {"error": "Not found"})
@@ -425,7 +436,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(409, {"error": "Pipeline already running."})
                 return
             try:
-                result = detector.detect_door_number(
+                result = get_detector().detect_door_number(
                     lat, lon, hdg, pit, cancel_event=cancel_event
                 )
             except Exception:
@@ -536,7 +547,8 @@ def main():
                 cancel_event.set()
         if worker is not None and worker is not threading.current_thread():
             worker.join()
-        detector.close()
+        if _detector is not None:
+            _detector.close()
 
 
 if __name__ == "__main__":
