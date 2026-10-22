@@ -30,3 +30,5 @@ Thumbs.db
 .env
 
 Portas_Teste.xlsx
+predictions_*.csv
+*.metrics.json

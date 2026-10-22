@@ -334,7 +334,7 @@
             <div class="form-group" style="margin-bottom:16px">
                 <label class="form-label">Valor</label>
                 <input type="text" id="filterValue" class="form-input"
-                    placeholder="Ex: Lisboa, Cascais, 73789..."
+                    placeholder="Ex: Lisboa, Cascais, código da rua..."
                     oninput="onSqlInput()"
                     onkeydown="if(event.key==='Enter' && !document.getElementById('btnSql').disabled) runSqlServer()">
             </div>
@@ -844,6 +844,12 @@
         return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
     }
 
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        })[char]);
+    }
+
     const isMatch     = r => /^(true|yes|✓)/i.test((r.MATCH || '').trim());
     const isFound     = r => /^yes$/i.test((r.PREDICTION_FOUND || '').trim());
     const isNoImagery = r => (r.PREDICTION_FOUND || '').trim().toUpperCase() === 'NO_IMAGERY';
@@ -914,21 +920,23 @@
     function obsTd(r) {
         const obs = (r.OBSERVATION || '').trim();
         if (!obs) return `<td style="color:var(--text-faint)">—</td>`;
-        return `<td><span class="badge b-no-imagery" title="${obs}">📷 Sem GSV</span></td>`;
+        return `<td><span class="badge b-no-imagery" title="${escapeHtml(obs)}">📷 Sem GSV</span></td>`;
     }
     function confHtml(c) {
-        const n = parseInt(c) || 0;
+        const n = Math.min(100, Math.max(0, parseInt(c, 10) || 0));
         return `<div class="conf-wrap"><div class="conf-bar"><div class="conf-fill" style="width:${n}%"></div></div><span class="conf-text">${n}%</span></div>`;
     }
     function mapHtml(r) {
         const { LATITUDE: lat, LONGITUDE: lon } = r;
-        if (!lat || !lon) return '—';
-        return `<a class="map-link" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">Ver ↗</a>`;
+        const latitude = Number(lat), longitude = Number(lon);
+        if (!lat || !lon || !Number.isFinite(latitude) || !Number.isFinite(longitude)
+            || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return '—';
+        return `<a class="map-link" href="https://www.google.com/maps?q=${encodeURIComponent(latitude)},${encodeURIComponent(longitude)}" target="_blank" rel="noopener noreferrer">Ver ↗</a>`;
     }
     function coordsHtml(r) {
         const { LATITUDE: lat, LONGITUDE: lon } = r;
         if (!lat || !lon) return '<span style="color:var(--text-faint)">—</span>';
-        return `<span class="coords-text">${lat}, ${lon}</span>`;
+        return `<span class="coords-text">${escapeHtml(lat)}, ${escapeHtml(lon)}</span>`;
     }
     function idxTd(n) { return `<td class="idx">${n}</td>`; }
 
@@ -942,8 +950,8 @@
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
             return `<tr class="${rowClass(r)}">${idxTd(idx)}
-                <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
-                <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
+                <td class="mono">${escapeHtml(r.NOME_COMPLETO_PORTA || '—')}</td>
+                <td class="mono" style="font-weight:400;color:var(--text-muted)">${escapeHtml(r.PREDICTION || '—')}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
                 ${obsTd(r)}
@@ -984,17 +992,15 @@
             const doorsHtml = `<div class="door-badges">${g.rows.map(r => {
                 const cls = isNoImagery(r) ? 'b-no-imagery' : isMatch(r) ? 'b-match' : !isFound(r) ? 'b-notfound' : 'b-wrong';
                 const lbl = isNoImagery(r) ? 'Sem cobertura' : isMatch(r) ? 'Match' : !isFound(r) ? 'Nao encontrado' : 'Upgrade';
-                return `<span class="badge ${cls}" title="${lbl}">${r.NOME_COMPLETO_PORTA || '—'}</span>`;
+                return `<span class="badge ${cls}" title="${lbl}">${escapeHtml(r.NOME_COMPLETO_PORTA || '—')}</span>`;
             }).join('')}</div>`;
 
-            const coords  = (g.lat && g.lon) ? `${g.lat}, ${g.lon}` : '—';
-            const mapLink = (g.lat && g.lon)
-                ? `<a class="map-link" href="https://www.google.com/maps?q=${g.lat},${g.lon}" target="_blank">Ver ↗</a>`
-                : '—';
+            const coords  = (g.lat && g.lon) ? `${escapeHtml(g.lat)}, ${escapeHtml(g.lon)}` : '—';
+            const mapLink = mapHtml({ LATITUDE: g.lat, LONGITUDE: g.lon });
 
             const predCell = g.hasNoImagery && !g.prediction
                 ? `<span class="badge b-no-imagery">📷 Sem cobertura</span>`
-                : `<span class="mono" style="font-weight:400;color:var(--text-muted)">${g.prediction || '—'}</span>`;
+                : `<span class="mono" style="font-weight:400;color:var(--text-muted)">${escapeHtml(g.prediction || '—')}</span>`;
 
             const summaryParts = [];
             if (matched)  summaryParts.push(`<span class="badge b-match">${matched} ✓</span>`);
@@ -1029,8 +1035,8 @@
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
             return `<tr class="${rowClass(r)}">${idxTd(idx)}
-                <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
-                <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
+                <td class="mono">${escapeHtml(r.NOME_COMPLETO_PORTA || '—')}</td>
+                <td class="mono" style="font-weight:400;color:var(--text-muted)">${escapeHtml(r.PREDICTION || '—')}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
                 ${obsTd(r)}

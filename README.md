@@ -75,6 +75,8 @@ Edit `.env` and fill in at minimum:
 ~~~env
 # Required
 GOOGLE_API_KEY=your_actual_google_api_key_here
+WEB_USERNAME=your_username
+WEB_PASSWORD=a_long_random_password
 
 # Web server behaviour: "True" = background (hidden window), "False" = foreground
 RUN_IN_BACKGROUND=False
@@ -113,6 +115,7 @@ Or run from CMD:
 - `True` → runs hidden; logs go to `server.log` / `server_error.log`; PID saved to `server.pid`
 
 Then open **http://127.0.0.1:8080** in your browser.
+The browser will prompt for the configured web credentials. The server binds to `127.0.0.1` by default. If you change `WEB_HOST` to expose it beyond the local machine, place it behind a trusted HTTPS reverse proxy.
 
 ### Option B: Run the web server manually
 

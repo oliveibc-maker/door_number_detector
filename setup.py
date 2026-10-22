@@ -10,11 +10,9 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="door_number_detector",
     version="1.0.0",
-    author="oliveibc-maker",
     description="Detecção de números de portas via Google Street View com OCR",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/oliveibc-maker/door_number_detector",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -34,5 +32,6 @@ setup(
         "pandas>=2.0.0",
         "pyodbc>=5.0.0",
         "openpyxl>=3.1.0",
+        "defusedxml>=0.7.1",
     ],
 )

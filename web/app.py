@@ -1,7 +1,10 @@
 import csv
+import base64
+import hmac
 import json
 import logging
-import socket
+import math
+import re
 import sys
 import threading
 from datetime import datetime
@@ -33,17 +36,6 @@ _state = {
     "cancel_event": None,
     "metrics":      None,
 }
-
-
-def _get_local_ip() -> str:
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
 
 
 def _count_excel_rows(path: Path) -> int:
@@ -127,7 +119,40 @@ def _read_csv() -> list:
 
 class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
+    auth_username = ""
+    auth_password = ""
+
+    def _send_security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
+    def _is_authorized(self) -> bool:
+        try:
+            scheme, token = self.headers.get("Authorization", "").split(" ", 1)
+            if scheme.lower() != "basic":
+                raise ValueError("Unsupported authorization scheme")
+            credentials = base64.b64decode(token, validate=True).decode("utf-8")
+            username, password = credentials.split(":", 1)
+            valid = hmac.compare_digest(username.encode("utf-8"), self.auth_username.encode("utf-8"))
+            valid &= hmac.compare_digest(password.encode("utf-8"), self.auth_password.encode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            valid = False
+        if valid:
+            return True
+        body = b"Authentication required."
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="Door Number Detector", charset="UTF-8"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self._send_security_headers()
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
     def do_GET(self):
+        if not self._is_authorized():
+            return
         parsed = urlparse(self.path)
 
         if parsed.path == "/":
@@ -155,6 +180,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
             self.send_header("Content-Length", str(len(data)))
+            self._send_security_headers()
             self.end_headers()
             self.wfile.write(data)
 
@@ -165,6 +191,8 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
+        if not self._is_authorized():
+            return
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
@@ -243,7 +271,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 return
 
             ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_name = filter_value.replace(" ", "_")
+            safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", filter_value).strip("_")[:80] or "filter"
             csv_path  = ROOT_DIR / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
 
             metrics = RunMetrics()
@@ -274,7 +302,17 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 hdg = int(data.get("heading", ["0"])[0] or 0)
                 pit = int(data.get("pitch",   ["0"])[0] or 0)
             except ValueError:
-                self._send_json(400, {"error": "Latitude e longitude invalidos."})
+                self._send_json(400, {"error": "Coordinates and camera angles must be numeric."})
+                return
+            if (
+                not math.isfinite(lat)
+                or not math.isfinite(lon)
+                or not -90 <= lat <= 90
+                or not -180 <= lon <= 180
+                or not 0 <= hdg <= 359
+                or not -90 <= pit <= 90
+            ):
+                self._send_json(400, {"error": "Coordinates or camera angles are outside valid ranges."})
                 return
             self._send_json(200, detector.detect_door_number(lat, lon, hdg, pit))
 
@@ -287,6 +325,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(file_path.read_bytes())
 
@@ -295,6 +334,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -302,18 +342,31 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         return
 
 
-def create_server(host="0.0.0.0", port=8080):
-    return ThreadingHTTPServer((host, port), DoorNumberRequestHandler)
+def create_server(host=None, port=None):
+    config = Config()
+    username, password = config.web_username, config.web_password
+    if not username or not password:
+        raise RuntimeError("Set WEB_USERNAME and WEB_PASSWORD before starting the web server.")
+    host = host or config.web_host or "127.0.0.1"
+    port = port or config.web_port
+    handler = type(
+        "ConfiguredDoorNumberRequestHandler",
+        (DoorNumberRequestHandler,),
+        {"auth_username": username, "auth_password": password},
+    )
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        logging.getLogger(__name__).warning(
+            "Non-loopback bind selected; terminate HTTPS at a trusted reverse proxy."
+        )
+    return ThreadingHTTPServer((host, port), handler)
 
 
 def main():
     server   = create_server()
-    local_ip = _get_local_ip()
     print("=" * 50)
     print("Door Number Detector — Web Server")
     print("=" * 50)
-    print(f"Local:    http://127.0.0.1:8080")
-    print(f"Network:  http://{local_ip}:8080")
+    print(f"Local:    http://127.0.0.1:{server.server_address[1]}")
     print("=" * 50)
     print("Press Ctrl+C to stop.")
     try:

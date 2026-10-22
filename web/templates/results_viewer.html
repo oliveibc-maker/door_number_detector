@@ -651,6 +651,23 @@
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        })[char]);
+    }
+
+    function trustedMapLink(value) {
+        try {
+            const url = new URL(value);
+            return url.protocol === 'https:' && url.hostname === 'www.google.com' && url.pathname === '/maps'
+                ? url.href
+                : '';
+        } catch {
+            return '';
+        }
+    }
+
     function rowClass(r) {
         if (isNoImagery(r)) return 'r-no-imagery';
         if (isMatch(r))     return 'r-match';
@@ -669,12 +686,12 @@
         const obs = (r.OBSERVATION || '').trim();
         const nsi = isNoImagery(r);
         if (!obs && !nsi) return `<td style="color:var(--text-faint)">—</td>`;
-        if (nsi)          return `<td><span class="badge b-no-imagery" title="${obs || 'Sem Street View'}">📷 Sem GSV</span></td>`;
-        return `<td style="font-size:12px;color:var(--text-muted)">${obs}</td>`;
+        if (nsi)          return `<td><span class="badge b-no-imagery" title="${escapeHtml(obs || 'Sem Street View')}">📷 Sem GSV</span></td>`;
+        return `<td style="font-size:12px;color:var(--text-muted)">${escapeHtml(obs)}</td>`;
     }
 
     function confHtml(c) {
-        const n = parseInt(c) || 0;
+        const n = Math.min(100, Math.max(0, parseInt(c, 10) || 0));
         return `<div class="conf-wrap">
             <div class="conf-bar"><div class="conf-fill" style="width:${n}%"></div></div>
             <span class="conf-text">${n}%</span>
@@ -683,21 +700,24 @@
 
     function mapHtml(r) {
         // Prefer pre-built MAPS_LINK column; fall back to constructing from lat/lon
-        if (r.MAPS_LINK && r.MAPS_LINK.startsWith('http')) {
-            return `<a class="map-link" href="${r.MAPS_LINK}" target="_blank">Ver ↗</a>`;
+        const mapsLink = trustedMapLink(r.MAPS_LINK || '');
+        if (mapsLink) {
+            return `<a class="map-link" href="${escapeHtml(mapsLink)}" target="_blank" rel="noopener noreferrer">Ver ↗</a>`;
         }
         const lat = r.LATITUDE, lon = r.LONGITUDE;
-        if (!lat || !lon) return '<span style="color:var(--text-faint)">—</span>';
-        return `<a class="map-link" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">Ver ↗</a>`;
+        const latitude = Number(lat), longitude = Number(lon);
+        if (!lat || !lon || !Number.isFinite(latitude) || !Number.isFinite(longitude)
+            || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return '<span style="color:var(--text-faint)">—</span>';
+        return `<a class="map-link" href="https://www.google.com/maps?q=${encodeURIComponent(latitude)},${encodeURIComponent(longitude)}" target="_blank" rel="noopener noreferrer">Ver ↗</a>`;
     }
 
     function coordsHtml(r) {
         // Prefer COORDINATES column; fall back to constructing
         const c = (r.COORDINATES || '').trim();
-        if (c) return `<span class="coords-text">${c}</span>`;
+        if (c) return `<span class="coords-text">${escapeHtml(c)}</span>`;
         const lat = r.LATITUDE, lon = r.LONGITUDE;
         if (!lat || !lon) return '<span style="color:var(--text-faint)">—</span>';
-        return `<span class="coords-text">${lat}, ${lon}</span>`;
+        return `<span class="coords-text">${escapeHtml(lat)}, ${escapeHtml(lon)}</span>`;
     }
 
     function idxTd(n) { return `<td class="idx">${n}</td>`; }
@@ -713,8 +733,8 @@
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
             return `<tr class="${rowClass(r)}">${idxTd(idx)}
-                <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
-                <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
+                <td class="mono">${escapeHtml(r.NOME_COMPLETO_PORTA || '—')}</td>
+                <td class="mono" style="font-weight:400;color:var(--text-muted)">${escapeHtml(r.PREDICTION || '—')}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
                 ${obsTd(r)}
@@ -756,17 +776,18 @@
             const doorsHtml = `<div class="door-badges">${g.rows.map(r => {
                 const cls = isNoImagery(r) ? 'b-no-imagery' : isMatch(r) ? 'b-match' : !isFound(r) ? 'b-notfound' : 'b-wrong';
                 const lbl = isNoImagery(r) ? 'Sem cobertura' : isMatch(r) ? 'Match' : !isFound(r) ? 'Nao encontrado' : 'Upgrade';
-                return `<span class="badge ${cls}" title="${lbl}">${r.NOME_COMPLETO_PORTA || '—'}</span>`;
+                return `<span class="badge ${cls}" title="${lbl}">${escapeHtml(r.NOME_COMPLETO_PORTA || '—')}</span>`;
             }).join('')}</div>`;
 
-            const coordsDisplay = g.coords || (g.lat && g.lon ? `${g.lat}, ${g.lon}` : '—');
+            const coordsDisplay = g.coords ? escapeHtml(g.coords) : (g.lat && g.lon ? `${escapeHtml(g.lat)}, ${escapeHtml(g.lon)}` : '—');
+            const mapsLink = trustedMapLink(g.mapsLink);
             const mapLink = g.mapsLink
-                ? `<a class="map-link" href="${g.mapsLink}" target="_blank">Ver ↗</a>`
-                : (g.lat && g.lon ? `<a class="map-link" href="https://www.google.com/maps?q=${g.lat},${g.lon}" target="_blank">Ver ↗</a>` : '—');
+                ? (mapsLink ? `<a class="map-link" href="${escapeHtml(mapsLink)}" target="_blank" rel="noopener noreferrer">Ver ↗</a>` : '—')
+                : (g.lat && g.lon ? mapHtml({ LATITUDE: g.lat, LONGITUDE: g.lon }) : '—');
 
             const predCell = g.hasNoImagery && !g.prediction
                 ? `<span class="badge b-no-imagery">📷 Sem cobertura</span>`
-                : `<span class="mono" style="font-weight:400;color:var(--text-muted)">${g.prediction || '—'}</span>`;
+                : `<span class="mono" style="font-weight:400;color:var(--text-muted)">${escapeHtml(g.prediction || '—')}</span>`;
 
             const summaryParts = [];
             if (matched)  summaryParts.push(`<span class="badge b-match">${matched} ✓</span>`);
@@ -802,8 +823,8 @@
         tbody.innerHTML = rows.map(r => {
             const idx = allRows.indexOf(r) + 1;
             return `<tr class="${rowClass(r)}">${idxTd(idx)}
-                <td class="mono">${r.NOME_COMPLETO_PORTA || '—'}</td>
-                <td class="mono" style="font-weight:400;color:var(--text-muted)">${r.PREDICTION || '—'}</td>
+                <td class="mono">${escapeHtml(r.NOME_COMPLETO_PORTA || '—')}</td>
+                <td class="mono" style="font-weight:400;color:var(--text-muted)">${escapeHtml(r.PREDICTION || '—')}</td>
                 <td>${confHtml(r.CONFIDENCE)}</td>
                 <td>${badgeHtml(r)}</td>
                 ${obsTd(r)}

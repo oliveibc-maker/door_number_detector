@@ -42,7 +42,7 @@ class StreetViewFetcher:
                 "http":  https_proxy,
                 "https": https_proxy,
             })
-            logger.info(f"StreetViewFetcher: using proxy {https_proxy}")
+            logger.info("StreetViewFetcher: using configured proxy")
 
         self._image_call_count:    int = 0
         self._metadata_call_count: int = 0
@@ -153,7 +153,11 @@ class StreetViewFetcher:
             except NoImageryAvailable:
                 raise
             except Exception as metadata_exc:
-                logger.warning(f"Could not resolve pano location: {metadata_exc}")
+                logger.warning(
+                    "Could not resolve pano location (%s): %s",
+                    type(metadata_exc).__name__,
+                    _redact_api_key(str(metadata_exc)),
+                )
                 location = f"{latitude},{longitude}"
                 if heading is None:
                     heading = 0
@@ -204,10 +208,10 @@ class StreetViewFetcher:
         except NoImageryAvailable:
             raise
         except requests.exceptions.RequestException as exc:
-            logger.error(f"Error fetching image: {exc}")
+            logger.error("Error fetching image: %s", _redact_api_key(str(exc)))
             return None
         except Exception as exc:
-            logger.error(f"Unexpected error: {exc}")
+            logger.error("Unexpected error: %s", _redact_api_key(str(exc)))
             return None
 
     def is_imagery_available(self, latitude, longitude) -> bool:
@@ -219,3 +223,9 @@ class StreetViewFetcher:
             return False
         except Exception:
             return False
+
+
+def _redact_api_key(message: str) -> str:
+    import re
+
+    return re.sub(r"(?i)([?&]key=)[^&\s]+", r"\1[REDACTED]", message)

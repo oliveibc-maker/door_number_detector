@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -63,23 +64,35 @@ class DatabaseManager:
 
     def _oracle_connection_string(self):
         """Build the Oracle connection string."""
-        return (
-            f"oracle+cx_Oracle://{self.config.db_user}:{self.config.db_password}"
-            f"@{self.config.db_host}:{self.config.db_port}/?service_name={self.config.db_sid}"
+        return URL.create(
+            "oracle+cx_oracle",
+            username=self.config.db_user,
+            password=self.config.db_password,
+            host=self.config.db_host,
+            port=self.config.db_port,
+            query={"service_name": self.config.db_sid},
         )
 
     def _postgresql_connection_string(self):
         """Build the PostgreSQL connection string."""
-        return (
-            f"postgresql://{self.config.db_user}:{self.config.db_password}"
-            f"@{self.config.db_host}:{self.config.db_port}/{self.config.db_name}"
+        return URL.create(
+            "postgresql",
+            username=self.config.db_user,
+            password=self.config.db_password,
+            host=self.config.db_host,
+            port=self.config.db_port,
+            database=self.config.db_name,
         )
 
     def _mysql_connection_string(self):
         """Build the MySQL connection string."""
-        return (
-            f"mysql+pymysql://{self.config.db_user}:{self.config.db_password}"
-            f"@{self.config.db_host}:{self.config.db_port}/{self.config.db_name}"
+        return URL.create(
+            "mysql+pymysql",
+            username=self.config.db_user,
+            password=self.config.db_password,
+            host=self.config.db_host,
+            port=self.config.db_port,
+            database=self.config.db_name,
         )
 
     def _init_db(self):

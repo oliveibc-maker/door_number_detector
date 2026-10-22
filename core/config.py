@@ -8,12 +8,31 @@ class Config:
     """Manages application configuration from .env file."""
 
     def __init__(self, env_file=".env"):
-        load_dotenv(env_file, override=True)
+        load_dotenv(env_file, override=False)
 
     # ── Google ─────────────────────────────────────────────────────────────────
     @property
     def google_api_key(self):
-        return os.getenv("GOOGLE_API_KEY", "YOUR_API_KEY_HERE")
+        api_key = os.getenv("GOOGLE_API_KEY", "").strip()
+        if not api_key or api_key.lower() in {"your_api_key_here", "your_key_here"}:
+            raise ValueError("Set GOOGLE_API_KEY to a valid Google Street View API key.")
+        return api_key
+
+    @property
+    def web_username(self):
+        return os.getenv("WEB_USERNAME", "").strip()
+
+    @property
+    def web_password(self):
+        return os.getenv("WEB_PASSWORD", "")
+
+    @property
+    def web_host(self):
+        return os.getenv("WEB_HOST", "127.0.0.1").strip()
+
+    @property
+    def web_port(self):
+        return int(os.getenv("WEB_PORT", "8080"))
 
     @property
     def street_view_size(self):
