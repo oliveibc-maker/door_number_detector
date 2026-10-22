@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
+from core.models import DetectionResult
+
 
 def _load_app_with_stubs():
     metrics_module = types.ModuleType("core.metrics")
@@ -141,6 +143,34 @@ class WebHandlerTests(unittest.TestCase):
         self.assertIn(b"Detection failed", body)
         self.assertNotIn(b"internal detail", body)
         self.assertFalse(self.app._state["running"])
+
+    def test_analysis_serializes_the_typed_result_contract(self):
+        typed_result = DetectionResult(
+            success=True,
+            latitude=41.0,
+            longitude=-8.0,
+            door_number="12A",
+            confidence=90,
+            heading=10,
+            pitch=0,
+        )
+        self.app._detector.detect_door_number = lambda *args, **kwargs: typed_result
+        status, body = self._request(
+            "POST",
+            "/api/analyze",
+            b"latitude=41.0&longitude=-8.0",
+            {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRF-Token": "test-csrf-token",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["door_number"], "12A")
+        self.assertIn("observation", payload)
+        self.assertIn("timestamp", payload)
+        self.assertIsNone(payload["error"])
 
     def test_detector_factory_is_lazy_and_constructs_once(self):
         self.assertIsNone(self.original_detector)

@@ -445,7 +445,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 return
             finally:
                 _finish_job(cancel_event)
-            self._send_json(200, result)
+            self._send_json(200, result.to_dict())
 
         else:
             self._send_json(404, {"error": "Not found"})

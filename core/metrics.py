@@ -40,8 +40,8 @@ class RunMetrics:
     elapsed = time.perf_counter() - t0
     img, meta = detector.street_view.get_call_counts()
     metrics.record(elapsed, img, meta,
-                   success=result.get("success", False),
-                   no_imagery=result.get("observation") == _NO_IMAGERY_OBS)
+                   success=result.success,
+                   no_imagery=result.observation == _NO_IMAGERY_OBS)
 
     # at the end of the run:
     metrics.print_summary()

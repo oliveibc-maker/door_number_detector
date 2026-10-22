@@ -22,6 +22,7 @@ from paddleocr import PaddleOCR
 from core.config import Config
 from core.database import DatabaseManager
 from core.google_street_view import StreetViewFetcher, NoImageryAvailable
+from core.models import DetectionResult
 
 
 # ── UTF-8 safe logging (fixes cp1252 crash on Windows) ────────────────────────
@@ -345,7 +346,7 @@ class DoorNumberDetector:
         pitch=None,
         image=None,
         cancel_event: threading.Event | None = None,
-    ):
+    ) -> DetectionResult:
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
 
@@ -370,8 +371,12 @@ class DoorNumberDetector:
             else:
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
-                    return {"success": False, "latitude": latitude, "longitude": longitude,
-                            "door_number": None, "confidence": 0, "error": "Cancelled"}
+                    return DetectionResult(
+                        success=False,
+                        latitude=latitude,
+                        longitude=longitude,
+                        error="Cancelled",
+                    )
 
                 _base_heading = heading
                 road_heading: float | None = None
@@ -411,14 +416,12 @@ class DoorNumberDetector:
 
             if not all_image_candidates:
                 logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
-                return {
-                    "success":     False,
-                    "latitude":    latitude,
-                    "longitude":   longitude,
-                    "door_number": None,
-                    "confidence":  0,
-                    "error":       "Image unavailable",
-                }
+                return DetectionResult(
+                    success=False,
+                    latitude=latitude,
+                    longitude=longitude,
+                    error="Image unavailable",
+                )
 
             confident_votes = Counter(
                 c["number"] for c in all_image_candidates
@@ -510,30 +513,31 @@ class DoorNumberDetector:
                     )
 
             success = bool(door_number and confidence >= self.config.confidence_threshold)
-            result = {
-                "success":     success,
-                "latitude":    latitude,
-                "longitude":   longitude,
-                "door_number": door_number if success else None,
-                "confidence":  confidence,
-                "heading":     heading,
-                "pitch":       pitch,
-                "observation": "",
-                "timestamp":   datetime.now().isoformat(),
-            }
-
+            error = None
             if not success:
-                result["error"] = (
+                error = (
                     f"Low confidence ({confidence}%). "
                     f"Requires at least {self.config.confidence_threshold}% to pass."
                 )
+            result = DetectionResult(
+                success=success,
+                latitude=latitude,
+                longitude=longitude,
+                door_number=door_number if success else None,
+                confidence=confidence,
+                heading=heading,
+                pitch=pitch,
+                error=error,
+            )
+
+            if not success:
                 logger.warning(
                     f"Low confidence result: '{door_number}' ({confidence}%). Marked as failed."
                 )
             else:
                 logger.info(f"Result: {door_number} (confidence: {confidence}%)")
 
-            self.db.save_result(result)
+            self.db.save_result(result.to_dict())
             return result
 
         except NoImageryAvailable:
@@ -541,26 +545,23 @@ class DoorNumberDetector:
                 f"No Street View imagery available for ({latitude}, {longitude}) — "
                 f"skipping OCR and recording observation."
             )
-            result = {
-                "success":     False,
-                "latitude":    latitude,
-                "longitude":   longitude,
-                "door_number": None,
-                "confidence":  0,
-                "observation": "No Street View imagery available",
-                "timestamp":   datetime.now().isoformat(),
-            }
-            self.db.save_result(result)
+            result = DetectionResult(
+                success=False,
+                latitude=latitude,
+                longitude=longitude,
+                observation="No Street View imagery available",
+            )
+            self.db.save_result(result.to_dict())
             return result
 
         except Exception as exc:
             logger.error(f"Error processing coordinate: {exc}", exc_info=True)
-            return {
-                "success":   False,
-                "latitude":  latitude,
-                "longitude": longitude,
-                "error":     str(exc),
-            }
+            return DetectionResult(
+                success=False,
+                latitude=latitude,
+                longitude=longitude,
+                error=str(exc),
+            )
 
     def process_coordinates_batch(self, coordinates_list: list) -> list:
         results = []

@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from core.batch import run_detection_batch
+from core.models import DetectionResult
 
 
 class FakeStreetView:
@@ -53,12 +54,13 @@ class BatchTests(unittest.TestCase):
             "LATITUDE": 41.2,
             "LONGITUDE": -8.6,
         }])
-        detector = FakeDetector([{
-            "success": True,
-            "door_number": "12A",
-            "confidence": 91,
-            "observation": "",
-        }])
+        detector = FakeDetector([DetectionResult(
+            success=True,
+            latitude=41.2,
+            longitude=-8.6,
+            door_number="12A",
+            confidence=91,
+        )])
         metrics = FakeMetrics()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -87,12 +89,13 @@ class BatchTests(unittest.TestCase):
             {"NOME_COMPLETO_PORTA": "1", "LATITUDE": 40.0, "LONGITUDE": -8.0},
             {"NOME_COMPLETO_PORTA": "2", "LATITUDE": 41.0, "LONGITUDE": -8.0},
         ])
-        detector = FakeDetector([{
-            "success": True,
-            "door_number": "2",
-            "confidence": 88,
-            "observation": "",
-        }])
+        detector = FakeDetector([DetectionResult(
+            success=True,
+            latitude=41.0,
+            longitude=-8.0,
+            door_number="2",
+            confidence=88,
+        )])
         header = (
             "LATITUDE;LONGITUDE;NOME_COMPLETO_PORTA;PREDICTION;CONFIDENCE;"
             "PREDICTION_FOUND;MATCH;OBSERVATION\n"
@@ -116,6 +119,35 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(detector.calls, [(41.0, -8.0)])
         self.assertEqual([row["NOME_COMPLETO_PORTA"] for row in rows], ["1", "2"])
+
+    def test_no_imagery_result_maps_to_existing_csv_fields_and_metrics(self):
+        dataframe = pd.DataFrame([{
+            "NOME_COMPLETO_PORTA": "4",
+            "LATITUDE": 41.2,
+            "LONGITUDE": -8.6,
+        }])
+        detector = FakeDetector([DetectionResult(
+            success=False,
+            latitude=41.2,
+            longitude=-8.6,
+            observation="No Street View imagery available",
+        )])
+        metrics = FakeMetrics()
+
+        with tempfile.TemporaryDirectory() as directory:
+            result_path = run_detection_batch(
+                dataframe,
+                Path(directory) / "no-imagery.csv",
+                set(),
+                detector_instance=detector,
+                metrics=metrics,
+            )
+            with result_path.open(newline="", encoding="utf-8-sig") as output_file:
+                row = next(csv.DictReader(output_file, delimiter=";"))
+
+        self.assertEqual(row["PREDICTION_FOUND"], "NO_IMAGERY")
+        self.assertEqual(row["OBSERVATION"], "No Street View imagery available")
+        self.assertTrue(metrics.records[0]["no_imagery"])
 
 
 if __name__ == "__main__":

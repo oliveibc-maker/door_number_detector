@@ -162,16 +162,16 @@ def run_detection_batch(
                         print(f"[{row_index}/{total}] Cancelled mid-detection — stopping.")
                         break
 
-                    observation = result.get("observation", "")
+                    observation = result.observation
                     is_no_imagery = observation == _NO_IMAGERY_OBSERVATION
                     if is_no_imagery:
                         prediction_found = _NO_IMAGERY_TOKEN
                         no_imagery_count += 1
                     else:
-                        prediction_found = "YES" if result.get("success", False) else "NO"
-                        prediction = result.get("door_number") if prediction_found == "YES" else None
-                        confidence = result.get("confidence", 0)
-                        result_success = result.get("success", False)
+                        prediction_found = "YES" if result.success else "NO"
+                        prediction = result.door_number if prediction_found == "YES" else None
+                        confidence = result.confidence
+                        result_success = result.success
                 except Exception as exc:
                     errors += 1
                     logger.error(
