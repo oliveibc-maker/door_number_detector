@@ -33,6 +33,23 @@ def new_upload_path(upload_dir: Path, filename: str) -> Path:
     return Path(upload_dir) / f"{uuid.uuid4().hex}{upload_suffix(filename)}"
 
 
+def remove_orphaned_uploads(upload_dir: Path) -> int:
+    upload_dir = Path(upload_dir)
+    if not upload_dir.exists():
+        return 0
+    removed = 0
+    for path in upload_dir.iterdir():
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or re.fullmatch(r"[0-9a-f]{32}\.xlsx?", path.name) is None
+        ):
+            continue
+        path.unlink()
+        removed += 1
+    return removed
+
+
 def valid_csrf_token(provided: str, expected: str) -> bool:
     if not provided:
         return False

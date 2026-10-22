@@ -713,8 +713,14 @@
     }
 
     async function resetToForms() {
-        clearInterval(pollTimer);
-        try { await fetch('/api/reset', { method: 'POST', headers: csrfHeaders() }); } catch { /* ignore */ }
+        try {
+            const response = await fetch('/api/reset', { method: 'POST', headers: csrfHeaders() });
+            if (response.status === 202) {
+                alert('Cancelamento pedido. Aguarde a deteccao atual terminar antes de iniciar outro processamento.');
+                return;
+            }
+        } catch { /* ignore */ }
+        if (pollTimer) clearInterval(pollTimer);
 
         allRows = []; activeFilter = 'ALL'; excelFile = null; currentView = 'list';
         document.getElementById('dashboard').style.display  = 'none';

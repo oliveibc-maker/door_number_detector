@@ -16,12 +16,12 @@ Automatic door number detection from geographic coordinates using Google Street 
 
 ### System requirements
 
-- Python **3.10**
-- SQL Server ODBC driver (only needed for the SQL Server source mode)
+- Python **3.11** (the version selected and tested for the Linux container)
+- SQL Server ODBC driver (only needed for SQL Server source mode outside Docker)
 
 ### Python dependencies
 
-All dependencies are installed via `pip` from `requirements.txt`. No external system tools are required.
+Runtime dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; `requirements.txt` is generated for pip-based installs. PaddleOCR downloads its models on first startup. SQL Server mode also requires the Microsoft SQL Server ODBC driver; the Docker image installs it.
 
 ---
 
@@ -30,38 +30,39 @@ All dependencies are installed via `pip` from `requirements.txt`. No external sy
 ### Step 1: Create and activate the virtual environment
 
 ~~~bash
-# If Python 3.10 is your default python:
-python -m venv .venv310
+# If Python 3.11 is your default python:
+python -m venv .venv
 
 # Or, using the Python Launcher (recommended if multiple versions are installed):
-py -3.10 -m venv .venv310
+py -3.11 -m venv .venv
 
 # Activate — Linux/macOS
-source .venv310/bin/activate
+source .venv/bin/activate
 
 # Activate — Windows PowerShell
-.\.venv310\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 
 # Activate — Windows CMD
-.venv310\Scripts\activate.bat
+.venv\Scripts\activate.bat
 ~~~
 
 If PowerShell blocks script execution:
 
 ~~~powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv310\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 ~~~
 
 ~~~bash
-#check the version of yout python (important - must be <= 3.10)
+# Check the tested Python version.
 python --version
 ~~~
 
 ### Step 2: Install dependencies
 
 ~~~bash
-pip install -r requirements.txt
+pip install uv
+uv sync --locked
 ~~~
 
 ### Step 3: Configure the environment
@@ -93,7 +94,7 @@ Get a Google Street View API key from: https://developers.google.com/maps/docume
 
 ## Running the application
 
-### Option A: Windows — use the provided scripts (recommended)
+### Option A: Windows — local development
 
 Double-click:
 
@@ -126,17 +127,31 @@ python web/app.py
 
 Then open **http://127.0.0.1:8080** in your browser.
 
-### Option C: Run the CLI directly
+### Option C: Run in Docker on Linux
 
-Edit the `main()` function in `entrypoint.py` to set your source and filter, then:
+Create `.env` as described above, then run:
+
+~~~bash
+docker compose up --build -d
+docker compose ps
+docker compose logs -f door-number-detector
+~~~
+
+Compose uses Linux host networking so the app remains bound to `127.0.0.1`; configure a same-host HTTPS reverse proxy to reach it remotely. SQLite, outputs, uploads, and the PaddleOCR model cache use the persistent `door_detector_data` volume. SQL Server authentication uses `SRC_DB_TRUSTED=False` and the configured SQL credentials in `.env`. Run one instance only: job coordination is process-local and SQLite is not configured for multi-instance access.
+
+### Option D: Run the CLI directly
+
+Set `SOURCE`, `FILTER_BY`, and `FILTER_VALUE` in `.env` for SQL Server, or set `SOURCE=excel` and `INPUT_EXCEL` for Excel, then:
 
 ~~~bash
 python entrypoint.py
 ~~~
 
 Supported sources:
-- `SOURCE = "sqlserver"` — queries SQL Server by `localidade`, `freguesia`, `concelho`, or `rua`
-- `SOURCE = "excel"` — processes an Excel file with columns `NOME_COMPLETO_PORTA`, `LATITUDE`, `LONGITUDE`
+- `SOURCE=sqlserver` — queries SQL Server by `localidade`, `freguesia`, `concelho`, or `rua`
+- `SOURCE=excel` — processes an Excel file with columns `NOME_COMPLETO_PORTA`, `LATITUDE`, `LONGITUDE`
+
+The CLI writes CSV and metrics files under `APP_DATA_DIR/outputs`. Web uploads are temporary and removed after the batch ends; completed CSV/metrics and the SQLite database are retained. Resume remains based on the existing CSV coordinate comparison, so it is suitable for this POC but not a durable source-row identity.
 
 ---
 
@@ -159,10 +174,8 @@ Each run produces two files next to the output CSV:
 | `PREDICTION` | Detected door number (empty if not found) |
 | `CONFIDENCE` | OCR confidence (%) |
 | `PREDICTION_FOUND` | `YES` / `NO` / `NO_IMAGERY` |
-| `MATCH` | `✓ MATCH` / `UPGRADE` / `? NOT FOUND` |
-| `MAPS_LINK` | Google Maps link for the coordinate |
-| `COORDINATES` | `LATITUDE,LONGITUDE` |
-| `NO_STREET_VIEW_IMAGERY` | `YES` if no Street View coverage exists |
+| `MATCH` | `YES` if the prediction matches the expected value, otherwise `NO` |
+| `OBSERVATION` | Additional result detail, including no-imagery status |
 
 ---
 

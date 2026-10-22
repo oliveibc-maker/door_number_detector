@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import secrets
+import signal
 import socket
 import sys
 import threading
@@ -26,13 +27,16 @@ from web.security import (
     is_loopback_host,
     new_upload_path,
     parse_content_length,
+    remove_orphaned_uploads,
     valid_csrf_token,
 )
 
 WEB_DIR       = Path(__file__).resolve().parent
 HTML_PATH     = WEB_DIR / "templates" / "index.html"
 TEMPLATE_PATH = WEB_DIR / "template_moradas.xlsx"
-UPLOAD_DIR    = ROOT_DIR / "data" / "uploads"
+DATA_DIR      = Config().data_dir
+UPLOAD_DIR    = DATA_DIR / "uploads"
+OUTPUT_DIR    = DATA_DIR / "outputs"
 
 # ── Single global detector ─────────────────────────────────────────────────────
 detector = DoorNumberDetector()
@@ -45,20 +49,54 @@ _state = {
     "error":        None,
     "cancel_event": None,
     "metrics":      None,
+    "worker":       None,
 }
+_state_lock = threading.Lock()
 
 
-def _count_excel_rows(path: Path) -> int:
+def _claim_job(csv_path=None, total=None, metrics=None):
+    with _state_lock:
+        if _state["running"]:
+            return None
+        cancel_event = threading.Event()
+        _state.update({
+            "running": True,
+            "error": None,
+            "cancel_event": cancel_event,
+            "worker": None,
+        })
+        if csv_path is not None:
+            _state["csv_path"] = str(csv_path)
+        if total is not None:
+            _state["total"] = total
+        if metrics is not None:
+            _state["metrics"] = metrics
+        return cancel_event
+
+
+def _finish_job(cancel_event: threading.Event, error=None) -> None:
+    with _state_lock:
+        if _state.get("cancel_event") is cancel_event:
+            if error and not cancel_event.is_set():
+                _state["error"] = error
+            _state["running"] = False
+            _state["cancel_event"] = None
+            _state["worker"] = None
+
+
+def _start_worker(target, args, cancel_event: threading.Event) -> None:
+    worker = threading.Thread(target=target, args=args, daemon=False)
+    with _state_lock:
+        if _state.get("cancel_event") is not cancel_event:
+            raise RuntimeError("Job reservation expired before worker startup.")
+        _state["worker"] = worker
     try:
-        return len(_read_excel_any(path))
-    except Exception:
-        return 0
-
-
-def _new_cancel_event() -> threading.Event:
-    ev = threading.Event()
-    _state["cancel_event"] = ev
-    return ev
+        worker.start()
+    except RuntimeError:
+        with _state_lock:
+            if _state.get("worker") is worker:
+                _state["worker"] = None
+        raise
 
 
 def _save_metrics(metrics: RunMetrics, csv_path: Path) -> None:
@@ -72,7 +110,7 @@ def _save_metrics(metrics: RunMetrics, csv_path: Path) -> None:
 
 def _run_batch(excel_path: Path, csv_path: Path, cancel_event: threading.Event, metrics: RunMetrics) -> None:
     _logger.info(f"[batch] Excel batch starting — {excel_path.name}")
-    _state.update({"running": True, "error": None})
+    error = None
     try:
         run_batch_predictions(
             excel_path, csv_path,
@@ -83,10 +121,14 @@ def _run_batch(excel_path: Path, csv_path: Path, cancel_event: threading.Event, 
     except Exception as exc:
         _logger.exception(f"[batch] Excel batch failed: {exc}")
         if not cancel_event.is_set():
-            _state["error"] = str(exc)
+            error = str(exc)
     finally:
-        _state["running"] = False
+        try:
+            excel_path.unlink(missing_ok=True)
+        except OSError as exc:
+            _logger.warning("[batch] Could not remove uploaded workbook: %s", exc)
         _save_metrics(metrics, csv_path)
+        _finish_job(cancel_event, error)
         _logger.info("[batch] Excel batch finished.")
 
 
@@ -95,11 +137,13 @@ def _run_sqlserver_batch(
     cancel_event: threading.Event, metrics: RunMetrics,
 ) -> None:
     _logger.info(f"[batch] SQL batch starting — {filter_by}={filter_value!r}")
-    _state.update({"running": True, "error": None})
+    error = None
     try:
         config = Config()
         df = _query_sqlserver(filter_by, filter_value, config)
-        _state["total"] = len(df)
+        with _state_lock:
+            if _state.get("cancel_event") is cancel_event:
+                _state["total"] = len(df)
         _run_detection_on_df(
             df, csv_path, set(),
             detector_instance=detector,
@@ -109,15 +153,18 @@ def _run_sqlserver_batch(
     except Exception as exc:
         _logger.exception(f"[batch] SQL batch failed: {exc}")
         if not cancel_event.is_set():
-            _state["error"] = str(exc)
+            error = str(exc)
     finally:
-        _state["running"] = False
         _save_metrics(metrics, csv_path)
+        _finish_job(cancel_event, error)
         _logger.info("[batch] SQL batch finished.")
 
 
-def _read_csv() -> list:
-    p = _state.get("csv_path")
+def _read_csv(path=None) -> list:
+    if path is None:
+        with _state_lock:
+            path = _state.get("csv_path")
+    p = path
     if not p:
         return []
     try:
@@ -203,14 +250,16 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"csrf_token": self.csrf_token})
 
         elif parsed.path == "/api/status":
-            rows = _read_csv()
-            m = _state.get("metrics")
+            with _state_lock:
+                state = _state.copy()
+            rows = _read_csv(state.get("csv_path"))
+            m = state.get("metrics")
             metrics_summary = m.summary() if m else None
             self._send_json(200, {
-                "running":   _state["running"],
-                "total":     _state["total"],
+                "running":   state["running"],
+                "total":     state["total"],
                 "processed": len(rows),
-                "error":     _state["error"],
+                "error":     state["error"],
                 "rows":      rows,
                 "metrics":   metrics_summary,
             })
@@ -243,24 +292,27 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
 
         if parsed.path == "/api/reset":
-            ev = _state.get("cancel_event")
-            if ev is not None:
-                ev.set()
-            _state.update({
-                "running":      False,
-                "csv_path":     None,
-                "total":        0,
-                "error":        None,
-                "cancel_event": None,
-                "metrics":      None,
-            })
+            with _state_lock:
+                ev = _state.get("cancel_event")
+                running = _state["running"]
+                if running and ev is not None:
+                    ev.set()
+                else:
+                    _state.update({
+                        "running":      False,
+                        "csv_path":     None,
+                        "total":        0,
+                        "error":        None,
+                        "cancel_event": None,
+                        "metrics":      None,
+                        "worker":       None,
+                    })
+            if running:
+                self._send_json(202, {"status": "cancelling"})
+                return
             self._send_json(200, {"status": "reset"})
 
         elif parsed.path == "/api/upload":
-            if _state["running"]:
-                self._send_json(409, {"error": "Pipeline already running."})
-                return
-
             filename = params.get("filename", [""])[0]
             try:
                 excel_path = new_upload_path(UPLOAD_DIR, filename)
@@ -288,31 +340,30 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             _logger.info("[upload] Accepted %s bytes as %s", len(data), excel_path.name)
 
             ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
-            csv_path = ROOT_DIR / f"predictions_{ts}.csv"
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            csv_path = OUTPUT_DIR / f"predictions_{ts}.csv"
 
             metrics = RunMetrics()
-            _state.update({
-                "running":  True,
-                "error":    None,
-                "total":    len(workbook),
-                "csv_path": str(csv_path),
-                "metrics":  metrics,
-            })
-
-            cancel_event = _new_cancel_event()
-            threading.Thread(
-                target=_run_batch,
-                args=(excel_path, csv_path, cancel_event, metrics),
-                daemon=True,
-            ).start()
+            cancel_event = _claim_job(csv_path, len(workbook), metrics)
+            if cancel_event is None:
+                excel_path.unlink(missing_ok=True)
+                self._send_json(409, {"error": "Pipeline already running."})
+                return
+            try:
+                _start_worker(
+                    _run_batch,
+                    (excel_path, csv_path, cancel_event, metrics),
+                    cancel_event,
+                )
+            except RuntimeError as exc:
+                excel_path.unlink(missing_ok=True)
+                _finish_job(cancel_event, str(exc))
+                self._send_json(500, {"error": "Could not start the batch worker."})
+                return
 
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
         elif parsed.path == "/api/run_sqlserver":
-            if _state["running"]:
-                self._send_json(409, {"error": "Pipeline already running."})
-                return
-
             body = self._read_body(self.max_request_bytes)
             if body is None:
                 return
@@ -333,23 +384,24 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
             ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", filter_value).strip("_")[:80] or "filter"
-            csv_path  = ROOT_DIR / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            csv_path  = OUTPUT_DIR / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
 
             metrics = RunMetrics()
-            _state.update({
-                "running":  True,
-                "error":    None,
-                "total":    0,
-                "csv_path": str(csv_path),
-                "metrics":  metrics,
-            })
-
-            cancel_event = _new_cancel_event()
-            threading.Thread(
-                target=_run_sqlserver_batch,
-                args=(filter_by, filter_value, csv_path, cancel_event, metrics),
-                daemon=True,
-            ).start()
+            cancel_event = _claim_job(csv_path, 0, metrics)
+            if cancel_event is None:
+                self._send_json(409, {"error": "Pipeline already running."})
+                return
+            try:
+                _start_worker(
+                    _run_sqlserver_batch,
+                    (filter_by, filter_value, csv_path, cancel_event, metrics),
+                    cancel_event,
+                )
+            except RuntimeError as exc:
+                _finish_job(cancel_event, str(exc))
+                self._send_json(500, {"error": "Could not start the batch worker."})
+                return
 
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
@@ -381,7 +433,21 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             ):
                 self._send_json(400, {"error": "Coordinates or camera angles are outside valid ranges."})
                 return
-            self._send_json(200, detector.detect_door_number(lat, lon, hdg, pit))
+            cancel_event = _claim_job(total=1)
+            if cancel_event is None:
+                self._send_json(409, {"error": "Pipeline already running."})
+                return
+            try:
+                result = detector.detect_door_number(
+                    lat, lon, hdg, pit, cancel_event=cancel_event
+                )
+            except Exception:
+                _logger.exception("Single-coordinate analysis failed.")
+                self._send_json(500, {"error": "Detection failed."})
+                return
+            finally:
+                _finish_job(cancel_event)
+            self._send_json(200, result)
 
         else:
             self._send_json(404, {"error": "Not found"})
@@ -414,6 +480,11 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         return
 
 
+class DoorNumberHTTPServer(ThreadingHTTPServer):
+    daemon_threads = False
+    block_on_close = True
+
+
 def create_server(host=None, port=None):
     config = Config()
     username, password = config.web_username, config.web_password
@@ -436,17 +507,25 @@ def create_server(host=None, port=None):
             "max_upload_bytes": config.max_upload_bytes,
         },
     )
-    server_class = ThreadingHTTPServer
+    server_class = DoorNumberHTTPServer
     if ":" in host:
-        class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+        class IPv6ThreadingHTTPServer(DoorNumberHTTPServer):
             address_family = socket.AF_INET6
 
         server_class = IPv6ThreadingHTTPServer
     return server_class((host, port), handler)
 
 
+def _handle_sigterm(_signum, _frame):
+    raise KeyboardInterrupt
+
+
 def main():
+    signal.signal(signal.SIGTERM, _handle_sigterm)
     server   = create_server()
+    removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
+    if removed_uploads:
+        _logger.info("Removed %s abandoned uploaded workbook(s).", removed_uploads)
     print("=" * 50)
     print("Door Number Detector — Web Server")
     print("=" * 50)
@@ -458,7 +537,19 @@ def main():
     except KeyboardInterrupt:
         print("Stopped.")
     finally:
+        with _state_lock:
+            cancel_event = _state.get("cancel_event")
+            if cancel_event is not None:
+                cancel_event.set()
         server.server_close()
+        with _state_lock:
+            cancel_event = _state.get("cancel_event")
+            worker = _state.get("worker")
+            if cancel_event is not None:
+                cancel_event.set()
+        if worker is not None and worker is not threading.current_thread():
+            worker.join()
+        detector.close()
 
 
 if __name__ == "__main__":

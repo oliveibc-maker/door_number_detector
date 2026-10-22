@@ -51,7 +51,9 @@ class DatabaseManager:
             elif db_type == "mysql":
                 connection_string = self._mysql_connection_string()
             elif db_type == "sqlite":
-                connection_string = "sqlite:///door_detector.db"
+                database_path = self.config.database_path
+                database_path.parent.mkdir(parents=True, exist_ok=True)
+                connection_string = URL.create("sqlite", database=str(database_path))
             else:
                 raise ValueError(f"Unknown database type: {db_type}")
 

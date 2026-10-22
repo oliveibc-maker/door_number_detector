@@ -1,9 +1,9 @@
 ﻿$root   = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$python = "$root\.venv310\Scripts\python.exe"
+$python = "$root\.venv\Scripts\python.exe"
 
 if (-not (Test-Path $python)) {
     Write-Host "ERROR: Python not found at $python" -ForegroundColor Red
-    Write-Host "Make sure the virtual environment is set up at $root\.venv310" -ForegroundColor Yellow
+    Write-Host "Make sure the Python 3.11 virtual environment is set up at $root\.venv" -ForegroundColor Yellow
     pause
     exit 1
 }

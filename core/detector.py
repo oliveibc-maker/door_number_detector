@@ -30,7 +30,9 @@ from core.google_street_view import StreetViewFetcher, NoImageryAvailable
 def _build_logger() -> logging.Logger:
     fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-    file_handler = logging.FileHandler("door_detector.log", encoding="utf-8")
+    log_path = Config().data_dir / "logs" / "door_detector.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setFormatter(fmt)
 
     utf8_stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -69,7 +71,7 @@ class DoorNumberDetector:
     def __init__(self, env_path=".env"):
         self.config = Config(env_path)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.debug_root = Path("ocr_debug")
+        self.debug_root = self.config.data_dir / "ocr_debug"
         self.debug_root.mkdir(parents=True, exist_ok=True)
         self.debug_dir = self.debug_root / ts
         self.debug_dir.mkdir(parents=True, exist_ok=True)

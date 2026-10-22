@@ -18,6 +18,8 @@ ocr_debug/
 
 # Local data and logs
 data/
+door_detector.db
+door_detector.db-*
 *.log
 *.pid
 *.sqlite3

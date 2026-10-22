@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from web.security import (
     is_loopback_host,
     new_upload_path,
     parse_content_length,
+    remove_orphaned_uploads,
     upload_suffix,
     valid_csrf_token,
 )
@@ -28,6 +30,19 @@ class WebSecurityTests(unittest.TestCase):
         self.assertEqual(path.suffix, ".xlsx")
         with self.assertRaises(ValueError):
             upload_suffix("payload.py")
+
+    def test_orphan_cleanup_removes_only_generated_spreadsheet_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            upload_dir = Path(directory)
+            orphan = upload_dir / ("a" * 32 + ".xlsx")
+            unrelated = upload_dir / "keep.xlsx"
+            orphan.write_bytes(b"orphan")
+            unrelated.write_bytes(b"keep")
+
+            self.assertEqual(remove_orphaned_uploads(upload_dir), 1)
+            self.assertFalse(orphan.exists())
+            self.assertTrue(unrelated.exists())
+            self.assertEqual(remove_orphaned_uploads(upload_dir), 0)
 
     def test_csrf_token_requires_exact_match(self):
         self.assertTrue(valid_csrf_token("token", "token"))

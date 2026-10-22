@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools==81.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "door-number-detector"
+version = "1.0.0"
+description = "Door number detection from Street View images using OCR"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "defusedxml==0.7.1",
+    "numpy==1.26.4",
+    "openpyxl==3.1.5",
+    "opencv-python==4.6.0.66",
+    "paddleocr==2.7.3",
+    "paddlepaddle==2.6.2",
+    "pandas==2.3.3",
+    "pillow==12.3.0",
+    "pyodbc==5.3.0",
+    "python-dotenv==1.2.2",
+    "requests==2.34.2",
+    "setuptools==81.0.0",
+    "sqlalchemy==2.0.51",
+    "xlrd==2.0.1",
+]
+
+[project.scripts]
+door-number-detector = "entrypoint:main"
+door-number-detector-web = "web.app:main"
+
+[tool.setuptools]
+py-modules = ["entrypoint"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "web*"]
+
+[tool.setuptools.package-data]
+web = ["templates/*.html"]

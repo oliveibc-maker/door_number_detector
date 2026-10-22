@@ -243,7 +243,7 @@ def _run_detection_on_df(
                 logger.warning(f"[{i}/{total}] Skipping row with null coordinates.")
             else:
                 detector.street_view.reset_call_counts()
-                t0 = time.process_time()
+                t0 = time.perf_counter()
 
                 _result_success = False
                 _is_no_imagery  = False
@@ -285,7 +285,7 @@ def _run_detection_on_df(
                     )
                     _img_e, _meta_e = detector.street_view.get_call_counts()
                     metrics.record(
-                        elapsed_s=time.process_time() - t0,
+                        elapsed_s=time.perf_counter() - t0,
                         image_calls=_img_e,
                         metadata_calls=_meta_e,
                         success=False,
@@ -295,7 +295,7 @@ def _run_detection_on_df(
 
                 _img, _meta = detector.street_view.get_call_counts()
                 metrics.record(
-                    elapsed_s=time.process_time() - t0,
+                    elapsed_s=time.perf_counter() - t0,
                     image_calls=_img,
                     metadata_calls=_meta,
                     success=_result_success,
@@ -429,6 +429,8 @@ def run_batch_predictions(
 
 def main():
     project_root = Path(__file__).resolve().parent
+    output_dir   = Config().data_dir / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
     ts           = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     source       = os.getenv("SOURCE", "sqlserver").strip().lower()
@@ -439,13 +441,13 @@ def main():
         if not filter_value:
             raise ValueError("Set FILTER_VALUE to select SQL Server source rows.")
         safe_name  = re.sub(r"[^A-Za-z0-9_-]+", "_", filter_value).strip("_")[:80] or "filter"
-        output_csv = project_root / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
+        output_csv = output_dir / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
         run_from_sqlserver(filter_by, filter_value, output_csv)
         return
 
     if source == "excel":
         input_workbook = Path(os.getenv("INPUT_EXCEL", str(project_root / "input.xlsx")))
-        output_csv     = project_root / f"predictions_{ts}.csv"
+        output_csv     = output_dir / f"predictions_{ts}.csv"
         run_batch_predictions(input_workbook, output_csv)
         return
 

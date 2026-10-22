@@ -1,6 +1,7 @@
 """Project configuration management."""
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 
@@ -33,6 +34,18 @@ class Config:
     @property
     def web_port(self):
         return int(os.getenv("WEB_PORT", "8080"))
+
+    @property
+    def data_dir(self):
+        default = Path(__file__).resolve().parent.parent / "data"
+        configured = Path(os.getenv("APP_DATA_DIR", str(default))).expanduser()
+        if not configured.is_absolute():
+            configured = Path(__file__).resolve().parent.parent / configured
+        return configured.resolve()
+
+    @property
+    def database_path(self):
+        return Path(os.getenv("DATABASE_PATH", "door_detector.db")).expanduser().resolve()
 
     @property
     def max_upload_bytes(self):
