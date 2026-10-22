@@ -33,7 +33,6 @@ from web.security import (
 
 WEB_DIR       = Path(__file__).resolve().parent
 HTML_PATH     = WEB_DIR / "templates" / "index.html"
-TEMPLATE_PATH = WEB_DIR / "template_moradas.xlsx"
 DATA_DIR      = Config().data_dir
 UPLOAD_DIR    = DATA_DIR / "uploads"
 OUTPUT_DIR    = DATA_DIR / "outputs"
@@ -263,19 +262,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 "rows":      rows,
                 "metrics":   metrics_summary,
             })
-
-        elif parsed.path == "/api/template":
-            if not TEMPLATE_PATH.exists():
-                self._send_json(404, {"error": "Template not found."})
-                return
-            data = TEMPLATE_PATH.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            self.send_header("Content-Disposition", 'attachment; filename="template_moradas.xlsx"')
-            self.send_header("Content-Length", str(len(data)))
-            self._send_security_headers()
-            self.end_headers()
-            self.wfile.write(data)
 
         elif parsed.path == "/api/results":
             self._send_json(200, detector.db.get_results(limit=20))

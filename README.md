@@ -157,7 +157,7 @@ The CLI writes CSV and metrics files under `APP_DATA_DIR/outputs`. Web uploads a
 
 ## Output
 
-Each run produces two files next to the output CSV:
+Each run writes two files under `APP_DATA_DIR/outputs`:
 
 | File | Description |
 |---|---|
@@ -177,28 +177,43 @@ Each run produces two files next to the output CSV:
 | `MATCH` | `YES` if the prediction matches the expected value, otherwise `NO` |
 | `OBSERVATION` | Additional result detail, including no-imagery status |
 
+### Offline CSV viewer
+
+To inspect an existing CSV without starting the server, open `web/templates/results_viewer.html` directly in a browser and select or drop the CSV file. This standalone viewer reads the selected file locally; it does not submit data to the application.
+
 ---
 
 ## Project structure
 
 ~~~
 .
+├── Dockerfile                    # Python 3.11 Linux container
+├── compose.yaml                  # Single-instance POC deployment
+├── pyproject.toml / uv.lock      # Runtime dependencies and lock
+├── requirements.txt              # Generated pip-compatible dependency list
 ├── entrypoint.py                 # CLI entry point (SQL Server or Excel batch)
-├── web/
-│   ├── app.py                    # Web server (Python built-in HTTP, port 8080)
-│   └── templates/
-│       └── index.html            # Web UI
 ├── core/
-│   ├── config.py                 # Configuration (.env loader)
-│   ├── database.py               # SQLite access
-│   ├── detector.py               # Detection workflow + PaddleOCR orchestration
+│   ├── config.py                 # Environment configuration
+│   ├── database.py               # SQLite result persistence
+│   ├── detector.py               # PaddleOCR detection workflow
 │   ├── google_street_view.py     # Street View API client
 │   └── metrics.py                # Run-level performance and cost metrics
+├── web/
+│   ├── app.py                    # Authenticated loopback HTTP server
+│   ├── healthcheck.py            # Container readiness check
+│   └── templates/
+│       ├── index.html            # Web application
+│       └── results_viewer.html   # Standalone offline CSV viewer
+├── tests/                        # Security and request lifecycle tests
+├── flowcharts/                   # English/Portuguese Mermaid sources
 ├── start.bat / start.ps1         # Windows start scripts
 ├── stop.bat  / stop.ps1          # Windows stop scripts
+├── .github/workflows/tests.yml   # Python 3.11 CI
 ├── .env.example                  # Environment template
-└── requirements.txt
+└── data/                          # Ignored local runtime data
 ~~~
+
+The Mermaid files in `flowcharts/` are the editable diagram sources.
 
 ---
 
@@ -207,6 +222,6 @@ Each run produces two files next to the output CSV:
 - OCR is handled exclusively by **PaddleOCR** (no Tesseract or EasyOCR required).
 - The pipeline uses **Street View metadata** (free) to locate the nearest panorama and compute camera heading before fetching images (billed at ~€0.0064/image).
 - Door number patterns supported: plain numbers, numbers with letters (e.g. `12A`), and keyword formats such as `LOTE`, `SECTOR`, `BLOCO`.
-- Runs can be **resumed** from an existing CSV — already-processed coordinates are skipped automatically.
-- Logs are written to `door_detector.log` (UTF-8).
+- Runs can be **resumed** from an existing CSV — already-processed coordinates are skipped by latitude/longitude. This is best-effort for the POC because multiple doors may share coordinates.
+- Logs are written to `APP_DATA_DIR/logs/door_detector.log` (UTF-8).
 - The SQLite database stores all detection results and can be queried from the web interface.

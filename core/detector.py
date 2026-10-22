@@ -6,9 +6,7 @@ os.environ["PADDLE_DISABLE_MKLDNN"] = "1"
 os.environ["FLAGS_enable_pir_in_executor"] = "0"
 
 import io
-from collections import defaultdict
 import logging
-import math
 import re
 import sys
 import threading
@@ -134,30 +132,6 @@ class DoorNumberDetector:
     def _is_bad_candidate(self, num: str) -> bool:
         return self._is_year_like(num) or self._is_suspicious_short(num)
 
-    def _has_non_year_alternative(self, candidates: list[dict]) -> bool:
-        return any(
-            c["number"]
-            and not self._is_bad_candidate(c["number"])
-            and c["number"] not in _BLOCKLIST
-            and c["confidence"] >= self.config.confidence_threshold
-            for c in candidates
-        )
-
-    def _needs_more_search(self, candidates: list[dict]) -> bool:
-        if not self._has_any_confident_candidate(candidates):
-            return True
-        _tmp_best = max(
-            (c for c in candidates if c["number"]),
-            key=lambda c: (c["confidence"], len(c["number"]) if c["number"] else 0),
-            default=None,
-        )
-        if _tmp_best is None:
-            return False
-        return (
-            self._is_bad_candidate(_tmp_best["number"])
-            and not self._has_non_year_alternative(candidates)
-        )
-
     def _parse_ocr_text(self, text: str) -> list[str]:
         upper = text.strip().upper()
 
@@ -236,24 +210,9 @@ class DoorNumberDetector:
         )
         return best_number, best_confidence_pct
 
-    @staticmethod
-    def _road_offset(
-        lat: float, lng: float, base_heading: float, distance_m: float
-    ) -> tuple[float, float]:
-        bearing = math.radians((base_heading + 90) % 360)
-        dlat = distance_m * math.cos(bearing) / 111_000
-        dlng = distance_m * math.sin(bearing) / (111_000 * math.cos(math.radians(lat)))
-        return lat + dlat, lng + dlng
-
     _FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
         (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
     ]
-
-    _EARLY_EXIT_MIN_DIGITS: int = 4
-    _EARLY_EXIT_MIN_AGREE:  int = 1
-
-    def _is_suspicious_number(self, num: str) -> bool:
-        return True
 
     def _no_early_stop_number(self, num: str) -> bool:
         if num in ("20", "2", "24", "25", "202"):
@@ -283,21 +242,7 @@ class DoorNumberDetector:
             )
             return False
 
-        if not self._is_suspicious_number(best_number):
-            return True
-
-        agreeing = sum(
-            1 for c in candidates
-            if c["number"] == best_number
-            and c["confidence"] >= self.config.confidence_threshold
-        )
-        return agreeing >= self._EARLY_EXIT_MIN_AGREE
-
-    def _has_any_confident_candidate(self, candidates: list[dict]) -> bool:
-        return any(
-            c["number"] and c["confidence"] >= self.config.confidence_threshold
-            for c in candidates
-        )
+        return True
 
     # ── Per-position iteration ─────────────────────────────────────────────────
     def _fetch_candidates(
@@ -462,34 +407,10 @@ class DoorNumberDetector:
                         logger.warning(f"Could not compute heading: {exc}. Using 0°.")
                         _base_heading = 0
 
-                effective_road_heading = road_heading if road_heading is not None else (_base_heading + 90) % 360
                 if road_heading is None:
                     logger.warning(
-                        f"road_heading unavailable — approximating as {effective_road_heading:.1f}° "
-                        f"(perpendicular to camera)"
+                        "road_heading unavailable — using camera-to-target heading."
                     )
-
-                angle_diff = (_base_heading - effective_road_heading + 360) % 360
-                side_sign  = -1 if angle_diff < 180 else +1
-
-                wide_offsets_fwd  = [side_sign * o for o in [45, 60, 90]]
-                wide_offsets_back = [-side_sign * o for o in [45, 60, 90]]
-
-                fov_sweep_wide_direct = [
-                    (10, wide_offsets_fwd,  [0, -5, 5, -10, 10, -15, 15]),
-                ]
-                fov_sweep_wide_right = [
-                    (10, wide_offsets_back, [0, -5, 5, -10, 10, -15, 15]),
-                ]
-                fov_sweep_wide_left = [
-                    (20, wide_offsets_fwd,  [0, -5, 5, -10, 10, -15, 15]),
-                    (10, wide_offsets_fwd,  [0, -5, 5, -10, 10, -15, 15]),
-                ]
-
-                offset_m = self.config.road_offset_meters
-                along_road_heading = (effective_road_heading - 90 + 360) % 360
-                r_lat, r_lng = self._road_offset(latitude, longitude, along_road_heading, +offset_m)
-                l_lat, l_lng = self._road_offset(latitude, longitude, along_road_heading, -offset_m)
 
                 # Pass 1 — direct heading, normal offsets (±30°)
                 logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
@@ -500,23 +421,6 @@ class DoorNumberDetector:
                     sweep=self._FOV_SWEEP,
                     cancel_event=cancel_event,
                 )
-
-                # Pass 1b — wide sweep toward building facade
-                # if self._needs_more_search(all_image_candidates):
-                #     if cancel_event is not None and cancel_event.is_set():
-                #         logger.info("Cancelled before Pass 1b.")
-                #     else:
-                #         logger.info(
-                #             f"Pass 1b: direct wide sweep "
-                #             f"({'RIGHT' if side_sign == 1 else 'LEFT'}, angle_diff={angle_diff:.1f}°)"
-                #         )
-                #         all_image_candidates.extend(self._fetch_candidates(
-                #             latitude, longitude, _base_heading,
-                #             pass_label="direct_wide",
-                #             pitch_override=pitch,
-                #             sweep=fov_sweep_wide_direct,
-                #             cancel_event=cancel_event,
-                #         ))
 
             if not all_image_candidates:
                 logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
