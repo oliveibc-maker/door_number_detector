@@ -35,6 +35,13 @@ class Config:
         return int(os.getenv("WEB_PORT", "8080"))
 
     @property
+    def max_upload_bytes(self):
+        value = int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+        if value <= 0:
+            raise ValueError("MAX_UPLOAD_BYTES must be a positive integer.")
+        return value
+
+    @property
     def street_view_size(self):
         return os.getenv("STREET_VIEW_SIZE", "640x640")
 

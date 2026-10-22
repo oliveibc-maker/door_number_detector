@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="__CSRF_TOKEN__">
+    <meta name="max-upload-bytes" content="__MAX_UPLOAD_BYTES__">
     <title>Door Number Detector</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -542,6 +544,12 @@
     let activeSource = 'excel';
     let currentView  = 'list';
     const POLL_MS    = 3000;
+    const csrfToken  = document.querySelector('meta[name="csrf-token"]').content;
+    const maxUploadBytes = Number(document.querySelector('meta[name="max-upload-bytes"]').content);
+
+    function csrfHeaders(headers = {}) {
+        return { ...headers, 'X-CSRF-Token': csrfToken };
+    }
 
     function isDashboardVisible() {
         return document.getElementById('dashboard').style.display === 'block';
@@ -641,13 +649,17 @@
 
     async function uploadAndRun() {
         if (!excelFile) return;
+        if (excelFile.size > maxUploadBytes) {
+            alert(`O ficheiro excede o limite de ${Math.floor(maxUploadBytes / 1048576)} MB.`);
+            return;
+        }
         const btn = document.getElementById('btnRun');
         btn.disabled    = true;
         btn.textContent = 'A enviar...';
         try {
             const bytes = await excelFile.arrayBuffer();
             const resp  = await fetch('/api/upload?filename=' + encodeURIComponent(excelFile.name), {
-                method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes,
+                method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/octet-stream' }), body: bytes,
             });
             if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Erro no servidor'); }
             activeSource = 'excel';
@@ -670,7 +682,7 @@
         try {
             const resp = await fetch('/api/run_sqlserver', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: csrfHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
                 body: `filter_by=${encodeURIComponent(filterBy)}&filter_value=${encodeURIComponent(filterValue)}`,
             });
             if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Erro no servidor'); }
@@ -702,7 +714,7 @@
 
     async function resetToForms() {
         clearInterval(pollTimer);
-        try { await fetch('/api/reset', { method: 'POST' }); } catch { /* ignore */ }
+        try { await fetch('/api/reset', { method: 'POST', headers: csrfHeaders() }); } catch { /* ignore */ }
 
         allRows = []; activeFilter = 'ALL'; excelFile = null; currentView = 'list';
         document.getElementById('dashboard').style.display  = 'none';

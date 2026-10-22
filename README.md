@@ -115,7 +115,8 @@ Or run from CMD:
 - `True` → runs hidden; logs go to `server.log` / `server_error.log`; PID saved to `server.pid`
 
 Then open **http://127.0.0.1:8080** in your browser.
-The browser will prompt for the configured web credentials. The server binds to `127.0.0.1` by default. If you change `WEB_HOST` to expose it beyond the local machine, place it behind a trusted HTTPS reverse proxy.
+The browser will prompt for the configured web credentials. The application only binds to loopback. For remote access, terminate HTTPS at a reverse proxy on the same host and have it forward to `127.0.0.1:8080`. Uploads are limited to 25 MiB by default; adjust `MAX_UPLOAD_BYTES` if your spreadsheets require more space.
+All POST requests require the `X-CSRF-Token` header. Browser requests use the token embedded in the page; authenticated API clients can fetch it from `GET /api/csrf` and must send it with each POST.
 
 ### Option B: Run the web server manually
 

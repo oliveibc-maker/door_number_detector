@@ -5,6 +5,8 @@ import json
 import logging
 import math
 import re
+import secrets
+import socket
 import sys
 import threading
 from datetime import datetime
@@ -19,10 +21,18 @@ from core.config import Config
 from core.detector import DoorNumberDetector
 from core.metrics import RunMetrics
 from entrypoint import run_batch_predictions, _query_sqlserver, _run_detection_on_df, _read_excel_any
+from web.security import (
+    UploadTooLarge,
+    is_loopback_host,
+    new_upload_path,
+    parse_content_length,
+    valid_csrf_token,
+)
 
 WEB_DIR       = Path(__file__).resolve().parent
 HTML_PATH     = WEB_DIR / "templates" / "index.html"
 TEMPLATE_PATH = WEB_DIR / "template_moradas.xlsx"
+UPLOAD_DIR    = ROOT_DIR / "data" / "uploads"
 
 # ── Single global detector ─────────────────────────────────────────────────────
 detector = DoorNumberDetector()
@@ -121,6 +131,9 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
     auth_username = ""
     auth_password = ""
+    csrf_token = ""
+    max_upload_bytes = 25 * 1024 * 1024
+    max_request_bytes = 16 * 1024
 
     def _send_security_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -150,6 +163,34 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         return False
 
+    def _is_csrf_valid(self) -> bool:
+        if valid_csrf_token(self.headers.get("X-CSRF-Token", ""), self.csrf_token):
+            return True
+        self._send_json(403, {"error": "Invalid or missing CSRF token."})
+        return False
+
+    def _read_body(self, maximum: int) -> bytes | None:
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self._send_json(400, {"error": "Transfer-Encoding is not supported."})
+            return None
+        try:
+            length = parse_content_length(self.headers.get("Content-Length"), maximum)
+        except UploadTooLarge:
+            self.close_connection = True
+            self._send_json(413, {"error": "Request body exceeds the configured size limit."})
+            return None
+        except ValueError as exc:
+            self.close_connection = True
+            self._send_json(400, {"error": str(exc)})
+            return None
+        body = self.rfile.read(length)
+        if len(body) != length:
+            self.close_connection = True
+            self._send_json(400, {"error": "Request body was incomplete."})
+            return None
+        return body
+
     def do_GET(self):
         if not self._is_authorized():
             return
@@ -157,6 +198,9 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/":
             self._serve_html(HTML_PATH)
+
+        elif parsed.path == "/api/csrf":
+            self._send_json(200, {"csrf_token": self.csrf_token})
 
         elif parsed.path == "/api/status":
             rows = _read_csv()
@@ -193,6 +237,8 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._is_authorized():
             return
+        if not self._is_csrf_valid():
+            return
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
@@ -215,22 +261,31 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(409, {"error": "Pipeline already running."})
                 return
 
-            fname  = Path(params.get("filename", ["upload.xlsx"])[0]).name
-            length = int(self.headers.get("Content-Length", "0"))
-            data   = self.rfile.read(length)
-
-            if not data:
-                self._send_json(400, {"error": "No file data received (Content-Length=0)."})
-                return
-
-            excel_path = ROOT_DIR / fname
+            filename = params.get("filename", [""])[0]
             try:
-                excel_path.write_bytes(data)
-                _logger.info(f"[upload] Saved {len(data):,} bytes → {excel_path}")
-            except Exception as exc:
-                _logger.error(f"[upload] Cannot save uploaded file: {exc}")
-                self._send_json(500, {"error": f"Cannot save file: {exc}"})
+                excel_path = new_upload_path(UPLOAD_DIR, filename)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
                 return
+            data = self._read_body(self.max_upload_bytes)
+            if data is None:
+                return
+            try:
+                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                with excel_path.open("xb") as uploaded_file:
+                    uploaded_file.write(data)
+                workbook = _read_excel_any(excel_path)
+                required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
+                if workbook.empty or not required_columns.issubset(workbook.columns):
+                    excel_path.unlink(missing_ok=True)
+                    self._send_json(400, {"error": "The spreadsheet is empty or missing required columns."})
+                    return
+            except Exception as exc:
+                excel_path.unlink(missing_ok=True)
+                _logger.warning("[upload] Rejected spreadsheet (%s).", type(exc).__name__)
+                self._send_json(400, {"error": "The uploaded file could not be read as a supported spreadsheet."})
+                return
+            _logger.info("[upload] Accepted %s bytes as %s", len(data), excel_path.name)
 
             ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
             csv_path = ROOT_DIR / f"predictions_{ts}.csv"
@@ -239,7 +294,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             _state.update({
                 "running":  True,
                 "error":    None,
-                "total":    _count_excel_rows(excel_path),
+                "total":    len(workbook),
                 "csv_path": str(csv_path),
                 "metrics":  metrics,
             })
@@ -258,8 +313,14 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(409, {"error": "Pipeline already running."})
                 return
 
-            length = int(self.headers.get("Content-Length", "0"))
-            body   = self.rfile.read(length).decode("utf-8")
+            body = self._read_body(self.max_request_bytes)
+            if body is None:
+                return
+            try:
+                body = body.decode("utf-8")
+            except UnicodeDecodeError:
+                self._send_json(400, {"error": "Request body must be UTF-8."})
+                return
             data   = parse_qs(body, keep_blank_values=True)
 
             filter_by    = data.get("filter_by",    [""])[0].strip()
@@ -293,8 +354,14 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
         elif parsed.path == "/api/analyze":
-            length = int(self.headers.get("Content-Length", "0"))
-            body   = self.rfile.read(length).decode("utf-8")
+            body = self._read_body(self.max_request_bytes)
+            if body is None:
+                return
+            try:
+                body = body.decode("utf-8")
+            except UnicodeDecodeError:
+                self._send_json(400, {"error": "Request body must be UTF-8."})
+                return
             data   = parse_qs(body, keep_blank_values=True)
             try:
                 lat = float(data.get("latitude",  [""])[0])
@@ -320,20 +387,25 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Not found"})
 
     def _serve_html(self, file_path: Path):
+        body = file_path.read_bytes()
+        body = body.replace(b"__CSRF_TOKEN__", self.csrf_token.encode("ascii"))
+        body = body.replace(b"__MAX_UPLOAD_BYTES__", str(self.max_upload_bytes).encode("ascii"))
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Content-Length", str(len(body)))
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
         self._send_security_headers()
         self.end_headers()
-        self.wfile.write(file_path.read_bytes())
+        self.wfile.write(body)
 
     def _send_json(self, code: int, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self._send_security_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -347,18 +419,30 @@ def create_server(host=None, port=None):
     username, password = config.web_username, config.web_password
     if not username or not password:
         raise RuntimeError("Set WEB_USERNAME and WEB_PASSWORD before starting the web server.")
-    host = host or config.web_host or "127.0.0.1"
-    port = port or config.web_port
+    host = config.web_host if host is None else host
+    host = host or "127.0.0.1"
+    port = config.web_port if port is None else port
+    if not is_loopback_host(host):
+        raise RuntimeError(
+            "The application must bind to loopback. Terminate remote HTTPS at a same-host reverse proxy."
+        )
     handler = type(
         "ConfiguredDoorNumberRequestHandler",
         (DoorNumberRequestHandler,),
-        {"auth_username": username, "auth_password": password},
+        {
+            "auth_username": username,
+            "auth_password": password,
+            "csrf_token": secrets.token_urlsafe(32),
+            "max_upload_bytes": config.max_upload_bytes,
+        },
     )
-    if host not in {"127.0.0.1", "localhost", "::1"}:
-        logging.getLogger(__name__).warning(
-            "Non-loopback bind selected; terminate HTTPS at a trusted reverse proxy."
-        )
-    return ThreadingHTTPServer((host, port), handler)
+    server_class = ThreadingHTTPServer
+    if ":" in host:
+        class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+            address_family = socket.AF_INET6
+
+        server_class = IPv6ThreadingHTTPServer
+    return server_class((host, port), handler)
 
 
 def main():

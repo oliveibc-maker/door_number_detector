@@ -17,6 +17,7 @@ ocr_debug/
 *.egg
 
 # Local data and logs
+data/
 *.log
 *.pid
 *.sqlite3
