@@ -15,8 +15,8 @@ from http.server import ThreadingHTTPServer
 def _load_app_with_stubs():
     detector_module = types.ModuleType("core.detector")
     metrics_module = types.ModuleType("core.metrics")
+    batch_module = types.ModuleType("core.batch")
     sources_module = types.ModuleType("core.sources")
-    entrypoint_module = types.ModuleType("entrypoint")
 
     class Detector:
         def __init__(self):
@@ -38,16 +38,16 @@ def _load_app_with_stubs():
 
     detector_module.DoorNumberDetector = Detector
     metrics_module.RunMetrics = Metrics
+    batch_module.run_detection_batch = lambda *args, **kwargs: None
+    batch_module.run_excel_batch = lambda *args, **kwargs: None
     sources_module.query_sqlserver = lambda *args, **kwargs: None
     sources_module.read_excel_any = lambda path: Workbook()
-    entrypoint_module.run_batch_predictions = lambda *args, **kwargs: None
-    entrypoint_module._run_detection_on_df = lambda *args, **kwargs: None
 
     with patch.dict(sys.modules, {
         "core.detector": detector_module,
         "core.metrics": metrics_module,
+        "core.batch": batch_module,
         "core.sources": sources_module,
-        "entrypoint": entrypoint_module,
     }):
         return importlib.import_module("web.app")
 
@@ -194,7 +194,7 @@ class WebHandlerTests(unittest.TestCase):
             worker_finished.set()
 
         try:
-            with patch.object(self.app, "run_batch_predictions", side_effect=hold_worker), patch.object(
+            with patch.object(self.app, "run_excel_batch", side_effect=hold_worker), patch.object(
                 self.app, "_finish_job", side_effect=signal_finish
             ):
                 status, _ = self._request(

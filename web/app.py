@@ -21,8 +21,8 @@ sys.path.insert(0, str(ROOT_DIR))
 from core.config import Config
 from core.detector import DoorNumberDetector
 from core.metrics import RunMetrics
+from core.batch import run_detection_batch, run_excel_batch
 from core.sources import query_sqlserver, read_excel_any
-from entrypoint import run_batch_predictions, _run_detection_on_df
 from web.security import (
     UploadTooLarge,
     is_loopback_host,
@@ -112,7 +112,7 @@ def _run_batch(excel_path: Path, csv_path: Path, cancel_event: threading.Event, 
     _logger.info(f"[batch] Excel batch starting — {excel_path.name}")
     error = None
     try:
-        run_batch_predictions(
+        run_excel_batch(
             excel_path, csv_path,
             detector_instance=detector,
             cancel_event=cancel_event,
@@ -144,7 +144,7 @@ def _run_sqlserver_batch(
         with _state_lock:
             if _state.get("cancel_event") is cancel_event:
                 _state["total"] = len(df)
-        _run_detection_on_df(
+        run_detection_batch(
             df, csv_path, set(),
             detector_instance=detector,
             cancel_event=cancel_event,

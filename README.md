@@ -194,6 +194,7 @@ To inspect an existing CSV without starting the server, open `web/templates/resu
 ├── entrypoint.py                 # CLI entry point (SQL Server or Excel batch)
 ├── core/
 │   ├── config.py                 # Environment configuration
+│   ├── batch.py                  # Shared CSV/resume/detection orchestration
 │   ├── database.py               # SQLite result persistence
 │   ├── detector.py               # PaddleOCR detection workflow
 │   ├── google_street_view.py     # Street View API client

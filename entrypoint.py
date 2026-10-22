@@ -1,351 +1,44 @@
-"""Project entry point for running the detector from the repository root."""
+"""CLI entry point for processing door-number batches."""
 
-import csv
 import os
 import re
-import time
-import threading
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional
 
-import pandas as pd
-
+from core.batch import run_excel_batch, run_sqlserver_batch
 from core.config import Config
-from core.detector import DoorNumberDetector
-from core.metrics import RunMetrics
-from core.sources import query_sqlserver, read_excel_any
 
-import sys
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-_OUTPUT_COLUMNS = [
-    "LATITUDE",
-    "LONGITUDE",
-    "NOME_COMPLETO_PORTA",
-    "PREDICTION",
-    "CONFIDENCE",
-    "PREDICTION_FOUND",
-    "MATCH",
-    "OBSERVATION",
-]
-
-_NO_IMAGERY_TOKEN = "NO_IMAGERY"
-_NO_IMAGERY_OBS   = "No Street View imagery available"
+run_batch_predictions = run_excel_batch
+run_from_sqlserver = run_sqlserver_batch
 
 
-def _normalize(s: str) -> str:
-    return re.sub(r"\s+", "", s.strip().upper())
-
-
-# ── CSV helpers ────────────────────────────────────────────────────────────────
-
-def _init_output_csv(output_path: Path) -> None:
-    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
-        csv.writer(f, delimiter=";").writerow(_OUTPUT_COLUMNS)
-
-
-def _append_row_to_csv(output_path: Path, row_data: list) -> None:
-    with open(output_path, "a", newline="", encoding="utf-8-sig") as f:
-        csv.writer(f, delimiter=";").writerow(row_data)
-
-
-def _load_already_processed(existing_csv: Path) -> set[tuple[float, float]]:
-    processed = set()
-    with open(existing_csv, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
-            try:
-                processed.add((float(row["LATITUDE"]), float(row["LONGITUDE"])))
-            except (KeyError, ValueError):
-                continue
-    return processed
-
-
-# ── Core detection loop ────────────────────────────────────────────────────────
-
-import logging
-logger = logging.getLogger(__name__)
-
-def _run_detection_on_df(
-    df: pd.DataFrame,
-    output_path: Path,
-    already_processed: set[tuple[float, float]],
-    existing_csv: Optional[Path] = None,
-    detector_instance=None,
-    cancel_event: Optional[threading.Event] = None,
-    metrics: Optional[RunMetrics] = None,
-) -> Path:
-    df_todo = df[
-        ~df.apply(
-            lambda r: (
-                not pd.isna(r["LATITUDE"])
-                and not pd.isna(r["LONGITUDE"])
-                and (float(r["LATITUDE"]), float(r["LONGITUDE"])) in already_processed
-            ),
-            axis=1,
-        )
-    ]
-
-    skipped = len(df) - len(df_todo)
-    if skipped:
-        print(f"Skipping {skipped} already-processed row(s). {len(df_todo)} remaining.")
-
-    if df_todo.empty:
-        print("Nothing to process — all rows already in the existing CSV.")
-        return existing_csv
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    _init_output_csv(output_path)
-
-    if existing_csv is not None:
-        with open(existing_csv, newline="", encoding="utf-8-sig") as src:
-            reader = csv.DictReader(src, delimiter=";")
-            for row in reader:
-                _append_row_to_csv(output_path, [row.get(col, "") for col in _OUTPUT_COLUMNS])
-        print(f"Copied {len(already_processed)} existing row(s) into {output_path.name}.")
-
-    _owns_detector = detector_instance is None
-    detector = detector_instance if detector_instance is not None else DoorNumberDetector()
-
-    _owns_metrics = metrics is None
-    if _owns_metrics:
-        metrics = RunMetrics()
-
-    total    = len(df_todo)
-    n_match  = 0
-    n_error  = 0
-    n_no_img = 0
-    i        = 0
-
-    try:
-        for i, (_, row) in enumerate(df_todo.iterrows(), 1):
-
-            if cancel_event is not None and cancel_event.is_set():
-                print(f"[{i}/{total}] Batch cancelled by user — stopping cleanly.")
-                break
-
-            nome      = str(row.get("NOME_COMPLETO_PORTA", "") or "").strip()
-            latitude  = row.get("LATITUDE")
-            longitude = row.get("LONGITUDE")
-
-            prediction       = None
-            confidence       = 0
-            prediction_found = "NO"
-            observation      = ""
-
-            if pd.isna(latitude) or pd.isna(longitude):
-                logger.warning(f"[{i}/{total}] Skipping row with null coordinates.")
-            else:
-                detector.street_view.reset_call_counts()
-                t0 = time.perf_counter()
-
-                _result_success = False
-                _is_no_imagery  = False
-
-                try:
-                    result = detector.detect_door_number(
-                        float(latitude), float(longitude),
-                        cancel_event=cancel_event,
-                    )
-
-                    if cancel_event is not None and cancel_event.is_set():
-                        print(f"[{i}/{total}] Cancelled mid-detection — stopping.")
-                        break
-
-                    observation    = result.get("observation", "")
-                    _is_no_imagery = (observation == _NO_IMAGERY_OBS)
-
-                    if _is_no_imagery:
-                        prediction_found = _NO_IMAGERY_TOKEN
-                        prediction       = None
-                        confidence       = 0
-                        n_no_img        += 1
-                    else:
-                        prediction_found = "YES" if result.get("success", False) else "NO"
-                        prediction       = result.get("door_number") if prediction_found == "YES" else None
-                        confidence       = result.get("confidence", 0)
-                        _result_success  = result.get("success", False)
-
-                except Exception as exc:
-                    n_error += 1
-                    logger.error(
-                        f"[{i}/{total}] detect_door_number raised an exception "
-                        f"at ({latitude}, {longitude}): {exc}",
-                        exc_info=True,
-                    )
-                    _append_row_to_csv(
-                        output_path,
-                        [latitude, longitude, nome, None, 0, "NO", "NO", ""],
-                    )
-                    _img_e, _meta_e = detector.street_view.get_call_counts()
-                    metrics.record(
-                        elapsed_s=time.perf_counter() - t0,
-                        image_calls=_img_e,
-                        metadata_calls=_meta_e,
-                        success=False,
-                        no_imagery=False,
-                    )
-                    continue
-
-                _img, _meta = detector.street_view.get_call_counts()
-                metrics.record(
-                    elapsed_s=time.perf_counter() - t0,
-                    image_calls=_img,
-                    metadata_calls=_meta,
-                    success=_result_success,
-                    no_imagery=_is_no_imagery,
-                )
-
-            match = "YES" if (
-                prediction is not None
-                and nome != ""
-                and _normalize(prediction) == _normalize(nome)
-            ) else "NO"
-            if match == "YES":
-                n_match += 1
-
-            _append_row_to_csv(
-                output_path,
-                [latitude, longitude, nome, prediction, confidence, prediction_found, match, observation],
-            )
-
-            status = (
-                "✓ MATCH"        if match == "YES" else
-                "📷 NO IMAGERY"  if prediction_found == _NO_IMAGERY_TOKEN else
-                "✗ WRONG"        if prediction_found == "YES" else
-                "? NOT FOUND"
-            )
-            print(f"[{i}/{total}] expected={nome!r} predicted={prediction!r} ({confidence}%) {status}")
-
-    except Exception as fatal:
-        logger.critical(f"Fatal error at row {i}/{total}: {fatal}", exc_info=True)
-        raise
-    finally:
-        if _owns_detector:
-            detector.close()
-
-    processed = i
-    cancelled = cancel_event is not None and cancel_event.is_set()
-
-    if cancelled:
-        print(f"\nCancelled after {processed} row(s). Partial results saved to {output_path}")
-    else:
-        addressable = total - n_no_img
-        print(
-            f"\nDone: {n_match}/{total} matched "
-            f"({100 * n_match / total:.1f}%) | "
-            f"{n_no_img} sem cobertura GSV | "
-            f"{n_error} error(s)"
-        )
-        if addressable:
-            print(f"Effective accuracy (excl. no imagery): {100 * n_match / addressable:.1f}%")
-        print(f"Saved to {output_path}")
-
-    metrics.print_summary()
-    if _owns_metrics:
-        metrics_path = output_path.with_suffix(".metrics.json")
-        metrics.save_json(metrics_path)
-        print(f"Metrics saved to {metrics_path.name}")
-
-    return output_path
-
-
-# ── Public API ─────────────────────────────────────────────────────────────────
-
-def run_from_sqlserver(
-    filter_by: Literal["localidade", "freguesia", "concelho", "rua"],
-    filter_value: str,
-    output_path: str | Path,
-    existing_csv: str | Path | None = None,
-    detector_instance=None,
-    cancel_event: Optional[threading.Event] = None,
-    metrics: Optional[RunMetrics] = None,
-) -> Path:
-    output_path = Path(output_path).with_suffix(".csv")
-    config      = Config()
-
-    df = query_sqlserver(filter_by, filter_value, config)
-
-    already_processed: set[tuple[float, float]] = set()
-    if existing_csv is not None:
-        existing_csv = Path(existing_csv)
-        if not existing_csv.exists():
-            raise FileNotFoundError(f"Existing CSV not found: {existing_csv}")
-        already_processed = _load_already_processed(existing_csv)
-        print(f"Resuming from {existing_csv.name} — {len(already_processed)} rows already processed.")
-
-    return _run_detection_on_df(
-        df, output_path, already_processed, existing_csv,
-        detector_instance=detector_instance,
-        cancel_event=cancel_event,
-        metrics=metrics,
-    )
-
-
-def run_batch_predictions(
-    input_path: str | Path,
-    output_path: str | Path,
-    existing_csv: str | Path | None = None,
-    detector_instance=None,
-    cancel_event: Optional[threading.Event] = None,
-    metrics: Optional[RunMetrics] = None,
-) -> Path:
-    input_path  = Path(input_path)
-    output_path = Path(output_path).with_suffix(".csv")
-
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input workbook not found: {input_path}")
-
-    df = read_excel_any(input_path)
-
-    required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
-    missing = required_columns.difference(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-    already_processed: set[tuple[float, float]] = set()
-    if existing_csv is not None:
-        existing_csv = Path(existing_csv)
-        if not existing_csv.exists():
-            raise FileNotFoundError(f"Existing CSV not found: {existing_csv}")
-        already_processed = _load_already_processed(existing_csv)
-        print(f"Resuming from {existing_csv.name} — {len(already_processed)} rows already processed.")
-
-    return _run_detection_on_df(
-        df, output_path, already_processed, existing_csv,
-        detector_instance=detector_instance,
-        cancel_event=cancel_event,
-        metrics=metrics,
-    )
-
-
-# ── Main ───────────────────────────────────────────────────────────────────────
-
-def main():
+def main() -> None:
     project_root = Path(__file__).resolve().parent
-    output_dir   = Config().data_dir / "outputs"
+    output_dir = Config().data_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
-    ts           = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    source       = os.getenv("SOURCE", "sqlserver").strip().lower()
-    filter_by    = os.getenv("FILTER_BY", "rua").strip().lower()
+    source = os.getenv("SOURCE", "sqlserver").strip().lower()
+    filter_by = os.getenv("FILTER_BY", "rua").strip().lower()
     filter_value = os.getenv("FILTER_VALUE", "").strip()
 
     if source == "sqlserver":
         if not filter_value:
             raise ValueError("Set FILTER_VALUE to select SQL Server source rows.")
-        safe_name  = re.sub(r"[^A-Za-z0-9_-]+", "_", filter_value).strip("_")[:80] or "filter"
-        output_csv = output_dir / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
-        run_from_sqlserver(filter_by, filter_value, output_csv)
+        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", filter_value).strip("_")[:80] or "filter"
+        output_csv = output_dir / f"predictions_{filter_by}_{safe_name}_{timestamp}.csv"
+        run_sqlserver_batch(filter_by, filter_value, output_csv)
         return
 
     if source == "excel":
         input_workbook = Path(os.getenv("INPUT_EXCEL", str(project_root / "input.xlsx")))
-        output_csv     = output_dir / f"predictions_{ts}.csv"
-        run_batch_predictions(input_workbook, output_csv)
+        output_csv = output_dir / f"predictions_{timestamp}.csv"
+        run_excel_batch(input_workbook, output_csv)
         return
 
     raise ValueError("SOURCE must be either 'sqlserver' or 'excel'.")
