@@ -7,7 +7,6 @@ from pathlib import Path
 
 from door_number_detector.core.google_street_view import NoImageryAvailable
 
-
 DEFAULT_FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
     (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
 ]
@@ -124,13 +123,15 @@ class StreetViewSweep:
                         number,
                         confidence,
                     )
-                    candidates.append({
-                        "number": number,
-                        "confidence": confidence,
-                        "heading": offset,
-                        "pitch": pitch,
-                        "fov": fov,
-                    })
+                    candidates.append(
+                        {
+                            "number": number,
+                            "confidence": confidence,
+                            "heading": offset,
+                            "pitch": pitch,
+                            "fov": fov,
+                        }
+                    )
 
                     if self.confidence_check(candidates):
                         self.logger.info(

@@ -1,6 +1,5 @@
 import csv
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 
@@ -49,18 +48,26 @@ class FakeMetrics:
 
 class BatchTests(unittest.TestCase):
     def test_detection_writes_expected_csv_and_records_metrics(self):
-        dataframe = pd.DataFrame([{
-            "NOME_COMPLETO_PORTA": "12 A",
-            "LATITUDE": 41.2,
-            "LONGITUDE": -8.6,
-        }])
-        detector = FakeDetector([DetectionResult(
-            success=True,
-            latitude=41.2,
-            longitude=-8.6,
-            door_number="12A",
-            confidence=91,
-        )])
+        dataframe = pd.DataFrame(
+            [
+                {
+                    "NOME_COMPLETO_PORTA": "12 A",
+                    "LATITUDE": 41.2,
+                    "LONGITUDE": -8.6,
+                }
+            ]
+        )
+        detector = FakeDetector(
+            [
+                DetectionResult(
+                    success=True,
+                    latitude=41.2,
+                    longitude=-8.6,
+                    door_number="12A",
+                    confidence=91,
+                )
+            ]
+        )
         metrics = FakeMetrics()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -85,17 +92,23 @@ class BatchTests(unittest.TestCase):
         self.assertTrue(metrics.records[0]["success"])
 
     def test_resume_copies_existing_rows_and_skips_matching_coordinates(self):
-        dataframe = pd.DataFrame([
-            {"NOME_COMPLETO_PORTA": "1", "LATITUDE": 40.0, "LONGITUDE": -8.0},
-            {"NOME_COMPLETO_PORTA": "2", "LATITUDE": 41.0, "LONGITUDE": -8.0},
-        ])
-        detector = FakeDetector([DetectionResult(
-            success=True,
-            latitude=41.0,
-            longitude=-8.0,
-            door_number="2",
-            confidence=88,
-        )])
+        dataframe = pd.DataFrame(
+            [
+                {"NOME_COMPLETO_PORTA": "1", "LATITUDE": 40.0, "LONGITUDE": -8.0},
+                {"NOME_COMPLETO_PORTA": "2", "LATITUDE": 41.0, "LONGITUDE": -8.0},
+            ]
+        )
+        detector = FakeDetector(
+            [
+                DetectionResult(
+                    success=True,
+                    latitude=41.0,
+                    longitude=-8.0,
+                    door_number="2",
+                    confidence=88,
+                )
+            ]
+        )
         header = (
             "LATITUDE;LONGITUDE;NOME_COMPLETO_PORTA;PREDICTION;CONFIDENCE;"
             "PREDICTION_FOUND;MATCH;OBSERVATION\n"
@@ -121,17 +134,25 @@ class BatchTests(unittest.TestCase):
         self.assertEqual([row["NOME_COMPLETO_PORTA"] for row in rows], ["1", "2"])
 
     def test_no_imagery_result_maps_to_existing_csv_fields_and_metrics(self):
-        dataframe = pd.DataFrame([{
-            "NOME_COMPLETO_PORTA": "4",
-            "LATITUDE": 41.2,
-            "LONGITUDE": -8.6,
-        }])
-        detector = FakeDetector([DetectionResult(
-            success=False,
-            latitude=41.2,
-            longitude=-8.6,
-            observation="No Street View imagery available",
-        )])
+        dataframe = pd.DataFrame(
+            [
+                {
+                    "NOME_COMPLETO_PORTA": "4",
+                    "LATITUDE": 41.2,
+                    "LONGITUDE": -8.6,
+                }
+            ]
+        )
+        detector = FakeDetector(
+            [
+                DetectionResult(
+                    success=False,
+                    latitude=41.2,
+                    longitude=-8.6,
+                    observation="No Street View imagery available",
+                )
+            ]
+        )
         metrics = FakeMetrics()
 
         with tempfile.TemporaryDirectory() as directory:

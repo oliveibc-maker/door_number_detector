@@ -2,10 +2,9 @@ import io
 import logging
 import tempfile
 import unittest
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest.mock import patch
-
-from logging.handlers import RotatingFileHandler
 
 from door_number_detector.logging_config import configure_logging
 
@@ -25,7 +24,9 @@ class LoggingConfigTests(unittest.TestCase):
                     if handler.get_name() == f"door_number_detector:{log_path}"
                 ]
                 self.assertEqual(len(configured_handlers), 2)
-                self.assertTrue(any(isinstance(handler, RotatingFileHandler) for handler in configured_handlers))
+                self.assertTrue(
+                    any(isinstance(handler, RotatingFileHandler) for handler in configured_handlers)
+                )
 
                 logger = logging.getLogger("door_number_detector.test")
                 logger.info("rotation configured")

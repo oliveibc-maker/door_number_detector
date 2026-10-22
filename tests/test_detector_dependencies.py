@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
+
 class FakeDatabase:
     def __init__(self):
         self.saved = []

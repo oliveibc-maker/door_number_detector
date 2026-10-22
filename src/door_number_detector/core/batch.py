@@ -8,13 +8,13 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from door_number_detector.core.config import Config
 from door_number_detector.core.metrics import RunMetrics
-from door_number_detector.core.sources import query_sqlserver, read_excel_any
+from door_number_detector.core.sources import SourceFilter, query_sqlserver, read_excel_any
 
 if TYPE_CHECKING:
     from door_number_detector.core.detector import DoorNumberDetector
@@ -63,7 +63,9 @@ def load_already_processed(existing_csv: Path) -> set[tuple[float, float]]:
     return processed
 
 
-def _get_resume_state(existing_csv: str | Path | None) -> tuple[set[tuple[float, float]], Path | None]:
+def _get_resume_state(
+    existing_csv: str | Path | None,
+) -> tuple[set[tuple[float, float]], Path | None]:
     if existing_csv is None:
         return set(), None
     existing_path = Path(existing_csv)
@@ -123,16 +125,19 @@ def run_detection_batch(
         logger.info("Copied %s existing row(s) into %s.", len(already_processed), output_path.name)
 
     owns_detector = detector_instance is None
+    detector: DoorNumberDetector
     if owns_detector:
         from door_number_detector.core.detector import DoorNumberDetector
 
         detector = DoorNumberDetector()
     else:
+        assert detector_instance is not None
         detector = detector_instance
 
     owns_metrics = metrics is None
-    if owns_metrics:
+    if metrics is None:
         metrics = RunMetrics()
+    assert metrics is not None
 
     total = len(rows_to_process)
     matches = 0
@@ -214,23 +219,39 @@ def run_detection_batch(
                     no_imagery=is_no_imagery,
                 )
 
-            match = "YES" if (
-                prediction is not None
-                and expected != ""
-                and _normalize(prediction) == _normalize(expected)
-            ) else "NO"
+            match = (
+                "YES"
+                if (
+                    prediction is not None
+                    and expected != ""
+                    and _normalize(prediction) == _normalize(expected)
+                )
+                else "NO"
+            )
             if match == "YES":
                 matches += 1
 
             _append_row_to_csv(
                 output_path,
-                [latitude, longitude, expected, prediction, confidence, prediction_found, match, observation],
+                [
+                    latitude,
+                    longitude,
+                    expected,
+                    prediction,
+                    confidence,
+                    prediction_found,
+                    match,
+                    observation,
+                ],
             )
             status = (
-                "✓ MATCH" if match == "YES" else
-                "📷 NO IMAGERY" if prediction_found == _NO_IMAGERY_TOKEN else
-                "✗ WRONG" if prediction_found == "YES" else
-                "? NOT FOUND"
+                "✓ MATCH"
+                if match == "YES"
+                else "📷 NO IMAGERY"
+                if prediction_found == _NO_IMAGERY_TOKEN
+                else "✗ WRONG"
+                if prediction_found == "YES"
+                else "? NOT FOUND"
             )
             logger.info(
                 "[%s/%s] expected=%r predicted=%r (%s%%) %s",
@@ -251,7 +272,9 @@ def run_detection_batch(
 
     cancelled = cancel_event is not None and cancel_event.is_set()
     if cancelled:
-        logger.info("Cancelled after %s row(s). Partial results saved to %s", row_index, output_path)
+        logger.info(
+            "Cancelled after %s row(s). Partial results saved to %s", row_index, output_path
+        )
     else:
         addressable = total - no_imagery_count
         logger.info(
@@ -263,7 +286,9 @@ def run_detection_batch(
             errors,
         )
         if addressable:
-            logger.info("Effective accuracy (excl. no imagery): %.1f%%", 100 * matches / addressable)
+            logger.info(
+                "Effective accuracy (excl. no imagery): %.1f%%", 100 * matches / addressable
+            )
         logger.info("Saved to %s", output_path)
 
     metrics.print_summary(print_fn=logger.info)
@@ -275,7 +300,7 @@ def run_detection_batch(
 
 
 def run_sqlserver_batch(
-    filter_by: Literal["localidade", "freguesia", "concelho", "rua"],
+    filter_by: SourceFilter,
     filter_value: str,
     output_path: str | Path,
     existing_csv: str | Path | None = None,

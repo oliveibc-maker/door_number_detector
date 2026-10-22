@@ -220,6 +220,24 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 
 The Mermaid files in `flowcharts/` are the editable diagram sources.
 
+## Development checks
+
+Install only the test and tooling groups:
+
+~~~bash
+uv sync --locked --no-install-project --no-default-groups --group test --group dev
+~~~
+
+Run the same checks used in CI:
+
+~~~bash
+uv run --locked --no-sync python -m compileall -q src tests
+uv run --locked --no-sync ruff check src tests setup.py
+uv run --locked --no-sync ruff format --check src tests setup.py
+uv run --locked --no-sync mypy
+uv run --locked --no-sync python -m unittest discover -s tests -v
+~~~
+
 ---
 
 ## Notes

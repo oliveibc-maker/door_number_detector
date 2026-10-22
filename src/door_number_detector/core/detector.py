@@ -12,17 +12,13 @@ import numpy as np
 
 from door_number_detector.core.config import Config
 from door_number_detector.core.database import DatabaseManager
-from door_number_detector.core.google_street_view import StreetViewFetcher, NoImageryAvailable
+from door_number_detector.core.google_street_view import NoImageryAvailable, StreetViewFetcher
 from door_number_detector.core.models import DetectionResult
 from door_number_detector.core.ocr import DoorNumberOCR
+from door_number_detector.core.parsing import BLOCKLIST
 from door_number_detector.core.sweep import StreetViewSweep
 
-
 logger = logging.getLogger(__name__)
-
-# ── Door number patterns ───────────────────────────────────────────────────────
-
-from door_number_detector.core.parsing import BLOCKLIST, parse_ocr_text
 
 
 class DoorNumberDetector:
@@ -41,19 +37,13 @@ class DoorNumberDetector:
         self.config = config if config is not None else Config(env_path)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.debug_root = (
-            Path(debug_root)
-            if debug_root is not None
-            else self.config.data_dir / "ocr_debug"
+            Path(debug_root) if debug_root is not None else self.config.data_dir / "ocr_debug"
         )
         self.debug_root.mkdir(parents=True, exist_ok=True)
         self.debug_dir = self.debug_root / ts
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.current_debug_house_dir: Path | None = None
-        self.db = (
-            database_manager
-            if database_manager is not None
-            else DatabaseManager(self.config)
-        )
+        self.db = database_manager if database_manager is not None else DatabaseManager(self.config)
         self.street_view = (
             street_view_fetcher
             if street_view_fetcher is not None
@@ -86,9 +76,9 @@ class DoorNumberDetector:
     @staticmethod
     def _is_year_like(num: str) -> bool:
         return bool(
-            re.fullmatch(r"202", num)      or
-            re.fullmatch(r"20\d{2}", num)  or
-            re.fullmatch(r"19\d{2}", num)
+            re.fullmatch(r"202", num)
+            or re.fullmatch(r"20\d{2}", num)
+            or re.fullmatch(r"19\d{2}", num)
         )
 
     @staticmethod
@@ -160,12 +150,14 @@ class DoorNumberDetector:
                 logger.info("Using supplied image instead of fetching from Street View")
                 number, confidence = self.ocr.extract_door_number(image)
                 logger.info(f"Supplied image -> '{number}' (confidence: {confidence}%)")
-                all_image_candidates.append({
-                    "number":     number,
-                    "confidence": confidence,
-                    "heading":    heading,
-                    "pitch":      pitch,
-                })
+                all_image_candidates.append(
+                    {
+                        "number": number,
+                        "confidence": confidence,
+                        "heading": heading,
+                        "pitch": pitch,
+                    }
+                )
             else:
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
@@ -198,14 +190,14 @@ class DoorNumberDetector:
                         _base_heading = 0
 
                 if road_heading is None:
-                    logger.warning(
-                        "road_heading unavailable — using camera-to-target heading."
-                    )
+                    logger.warning("road_heading unavailable — using camera-to-target heading.")
 
                 # Pass 1 — direct heading, normal offsets (±30°)
                 logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
                 all_image_candidates = self.sweep.fetch_candidates(
-                    latitude, longitude, _base_heading,
+                    latitude,
+                    longitude,
+                    _base_heading,
                     pass_label="direct",
                     pitch_override=pitch,
                     cancel_event=cancel_event,
@@ -223,7 +215,8 @@ class DoorNumberDetector:
                 )
 
             confident_votes = Counter(
-                c["number"] for c in all_image_candidates
+                c["number"]
+                for c in all_image_candidates
                 if c["number"] and c["confidence"] >= self.config.confidence_threshold
             )
 
@@ -237,9 +230,9 @@ class DoorNumberDetector:
             )
 
             door_number = best_candidate["number"]
-            confidence  = best_candidate["confidence"]
-            heading     = best_candidate["heading"]
-            pitch       = best_candidate["pitch"]
+            confidence = best_candidate["confidence"]
+            heading = best_candidate["heading"]
+            pitch = best_candidate["pitch"]
 
             logger.info(
                 f"Best across all passes: '{door_number}' ({confidence}%) "
@@ -255,7 +248,8 @@ class DoorNumberDetector:
 
                 clean_alternative = next(
                     (
-                        c for c in sorted_candidates
+                        c
+                        for c in sorted_candidates
                         if c["number"]
                         and c["number"] != door_number
                         and not self._is_bad_candidate(c["number"])
@@ -272,14 +266,15 @@ class DoorNumberDetector:
                         f"({clean_alternative['confidence']}%)"
                     )
                     door_number = clean_alternative["number"]
-                    confidence  = clean_alternative["confidence"]
-                    heading     = clean_alternative["heading"]
-                    pitch       = clean_alternative["pitch"]
+                    confidence = clean_alternative["confidence"]
+                    heading = clean_alternative["heading"]
+                    pitch = clean_alternative["pitch"]
 
                 elif self._is_year_like(door_number):
                     tier2_alternative = next(
                         (
-                            c for c in sorted_candidates
+                            c
+                            for c in sorted_candidates
                             if c["number"]
                             and c["number"] != door_number
                             and self._is_suspicious_short(c["number"])
@@ -297,13 +292,12 @@ class DoorNumberDetector:
                             f"({tier2_alternative['confidence']}%)"
                         )
                         door_number = tier2_alternative["number"]
-                        confidence  = tier2_alternative["confidence"]
-                        heading     = tier2_alternative["heading"]
-                        pitch       = tier2_alternative["pitch"]
+                        confidence = tier2_alternative["confidence"]
+                        heading = tier2_alternative["heading"]
+                        pitch = tier2_alternative["pitch"]
                     else:
                         logger.info(
-                            f"No clean or Tier 2 alternative found — keeping "
-                            f"Tier 1 '{door_number}'"
+                            f"No clean or Tier 2 alternative found — keeping Tier 1 '{door_number}'"
                         )
                 else:
                     logger.info(
@@ -364,7 +358,7 @@ class DoorNumberDetector:
 
     def process_coordinates_batch(self, coordinates_list: list) -> list:
         results = []
-        total   = len(coordinates_list)
+        total = len(coordinates_list)
         for index, coordinate in enumerate(coordinates_list, 1):
             logger.info(f"Processing {index}/{total}")
             result = self.detect_door_number(

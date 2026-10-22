@@ -9,7 +9,6 @@ import pandas as pd
 
 from door_number_detector.core.sources import query_sqlserver, read_excel_any, read_spreadsheetml
 
-
 SPREADSHEET_NAMESPACE = "urn:schemas-microsoft-com:office:spreadsheet"
 
 
@@ -64,15 +63,18 @@ class SqlServerSourceTests(unittest.TestCase):
             src_db_user="user",
             src_db_password="p;ass}word",
         )
-        dataframe = pd.DataFrame({
-            "NOME_COMPLETO_PORTA": ["12"],
-            "LATITUDE": ["41.2"],
-            "LONGITUDE": ["-8.6"],
-        })
+        dataframe = pd.DataFrame(
+            {
+                "NOME_COMPLETO_PORTA": ["12"],
+                "LATITUDE": ["41.2"],
+                "LONGITUDE": ["-8.6"],
+            }
+        )
 
-        with patch.dict(sys.modules, {"pyodbc": pyodbc_module}), patch(
-            "pandas.read_sql", return_value=dataframe
-        ) as read_sql:
+        with (
+            patch.dict(sys.modules, {"pyodbc": pyodbc_module}),
+            patch("pandas.read_sql", return_value=dataframe) as read_sql,
+        ):
             result = query_sqlserver("rua", "1; DROP TABLE source", config)
 
         connection_string = pyodbc_module.connect.call_args.args[0]

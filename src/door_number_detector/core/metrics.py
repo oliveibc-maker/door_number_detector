@@ -11,18 +11,18 @@ from typing import Callable, List
 # https://developers.google.com/maps/documentation/streetview/usage-and-billing
 # Image Static API: $7.00 / 1 000 requests  →  ~€6.40 / 1 000 (adjust to current rate)
 # Metadata API:     free
-_DEFAULT_COST_PER_IMAGE = 0.0064   # € — change to 0.007 and currency="$" for USD
-_DEFAULT_COST_PER_META  = 0.000
-_DEFAULT_CURRENCY       = "€"
+_DEFAULT_COST_PER_IMAGE = 0.0064  # € — change to 0.007 and currency="$" for USD
+_DEFAULT_COST_PER_META = 0.000
+_DEFAULT_CURRENCY = "€"
 
 
 @dataclass
 class _Record:
-    elapsed_s:      float
-    image_calls:    int
+    elapsed_s: float
+    image_calls: int
     metadata_calls: int
-    success:        bool
-    no_imagery:     bool
+    success: bool
+    no_imagery: bool
 
 
 class RunMetrics:
@@ -51,34 +51,36 @@ class RunMetrics:
     def __init__(
         self,
         cost_per_image: float = _DEFAULT_COST_PER_IMAGE,
-        cost_per_meta:  float = _DEFAULT_COST_PER_META,
-        currency:       str   = _DEFAULT_CURRENCY,
+        cost_per_meta: float = _DEFAULT_COST_PER_META,
+        currency: str = _DEFAULT_CURRENCY,
     ):
         self.cost_per_image = cost_per_image
-        self.cost_per_meta  = cost_per_meta
-        self.currency       = currency          # symbol used in display & JSON output
-        self._lock    = threading.Lock()
+        self.cost_per_meta = cost_per_meta
+        self.currency = currency  # symbol used in display & JSON output
+        self._lock = threading.Lock()
         self._records: List[_Record] = []
 
     # ── Recording ──────────────────────────────────────────────────────────────
 
     def record(
         self,
-        elapsed_s:      float,
-        image_calls:    int,
+        elapsed_s: float,
+        image_calls: int,
         metadata_calls: int,
-        success:        bool,
-        no_imagery:     bool,
+        success: bool,
+        no_imagery: bool,
     ) -> None:
         """Record the outcome of one detect_door_number() call."""
         with self._lock:
-            self._records.append(_Record(
-                elapsed_s=elapsed_s,
-                image_calls=image_calls,
-                metadata_calls=metadata_calls,
-                success=success,
-                no_imagery=no_imagery,
-            ))
+            self._records.append(
+                _Record(
+                    elapsed_s=elapsed_s,
+                    image_calls=image_calls,
+                    metadata_calls=metadata_calls,
+                    success=success,
+                    no_imagery=no_imagery,
+                )
+            )
 
     # ── Aggregates ─────────────────────────────────────────────────────────────
 
@@ -91,39 +93,36 @@ class RunMetrics:
         if n == 0:
             return {}
 
-        total_s      = sum(r.elapsed_s      for r in records)
-        total_img    = sum(r.image_calls     for r in records)
-        total_meta   = sum(r.metadata_calls  for r in records)
-        n_success    = sum(1 for r in records if r.success)
+        total_s = sum(r.elapsed_s for r in records)
+        total_img = sum(r.image_calls for r in records)
+        total_meta = sum(r.metadata_calls for r in records)
+        n_success = sum(1 for r in records if r.success)
         n_no_imagery = sum(1 for r in records if r.no_imagery)
-        total_cost   = (
-            total_img  * self.cost_per_image
-            + total_meta * self.cost_per_meta
-        )
+        total_cost = total_img * self.cost_per_image + total_meta * self.cost_per_meta
         times = [r.elapsed_s for r in records]
 
         return {
             # Throughput
-            "n_total":                       n,
-            "n_success":                     n_success,
-            "n_no_imagery":                  n_no_imagery,
-            "success_rate_pct":              round(100 * n_success / n, 1),
+            "n_total": n,
+            "n_success": n_success,
+            "n_no_imagery": n_no_imagery,
+            "success_rate_pct": round(100 * n_success / n, 1),
             # Time
-            "total_time_s":                  round(total_s, 2),
-            "avg_time_per_detection_s":      round(total_s / n, 2),
-            "min_time_s":                    round(min(times), 2),
-            "max_time_s":                    round(max(times), 2),
+            "total_time_s": round(total_s, 2),
+            "avg_time_per_detection_s": round(total_s / n, 2),
+            "min_time_s": round(min(times), 2),
+            "max_time_s": round(max(times), 2),
             # API calls
-            "total_image_api_calls":         total_img,
-            "total_metadata_api_calls":      total_meta,
-            "total_api_calls":               total_img + total_meta,
-            "avg_image_calls_per_detection": round(total_img  / n, 2),
-            "avg_meta_calls_per_detection":  round(total_meta / n, 2),
+            "total_image_api_calls": total_img,
+            "total_metadata_api_calls": total_meta,
+            "total_api_calls": total_img + total_meta,
+            "avg_image_calls_per_detection": round(total_img / n, 2),
+            "avg_meta_calls_per_detection": round(total_meta / n, 2),
             # Cost
-            "currency":                      self.currency,
-            "cost_per_image_call":           self.cost_per_image,
-            "total_cost":                    round(total_cost, 4),
-            "avg_cost_per_detection":        round(total_cost / n, 4),
+            "currency": self.currency,
+            "cost_per_image_call": self.cost_per_image,
+            "total_cost": round(total_cost, 4),
+            "avg_cost_per_detection": round(total_cost / n, 4),
         }
 
     # ── Display ────────────────────────────────────────────────────────────────
@@ -141,7 +140,7 @@ class RunMetrics:
         cur = s["currency"]
         SEP = "=" * 62
         DIV = "-" * 62
-        td  = str(timedelta(seconds=int(s["total_time_s"])))
+        td = str(timedelta(seconds=int(s["total_time_s"])))
 
         def row(label: str, value) -> None:
             print_fn(f"    {label:<36} {value}")
@@ -151,22 +150,28 @@ class RunMetrics:
         print_fn("  DETECTION RUN — METRICS")
         print_fn(SEP)
         print_fn("  THROUGHPUT")
-        row("Total processed",            s["n_total"])
-        row("  Successful",               f"{s['n_success']}  ({s['success_rate_pct']} %)")
-        row("  No Street View imagery",   s["n_no_imagery"])
+        row("Total processed", s["n_total"])
+        row("  Successful", f"{s['n_success']}  ({s['success_rate_pct']} %)")
+        row("  No Street View imagery", s["n_no_imagery"])
         print_fn(DIV)
         print_fn("  TIME")
-        row("Total",                      f"{s['total_time_s']:.1f} s  ({td})")
-        row("Avg per door number",        f"{s['avg_time_per_detection_s']:.2f} s")
-        row("Min / Max",                  f"{s['min_time_s']:.2f} s  /  {s['max_time_s']:.2f} s")
+        row("Total", f"{s['total_time_s']:.1f} s  ({td})")
+        row("Avg per door number", f"{s['avg_time_per_detection_s']:.2f} s")
+        row("Min / Max", f"{s['min_time_s']:.2f} s  /  {s['max_time_s']:.2f} s")
         print_fn(DIV)
         print_fn("  API CALLS  (Google Street View)")
-        row("Image calls  [billed]",      f"{s['total_image_api_calls']}   avg {s['avg_image_calls_per_detection']:.2f} / door")
-        row("Metadata calls  [free]",     f"{s['total_metadata_api_calls']}   avg {s['avg_meta_calls_per_detection']:.2f} / door")
+        row(
+            "Image calls  [billed]",
+            f"{s['total_image_api_calls']}   avg {s['avg_image_calls_per_detection']:.2f} / door",
+        )
+        row(
+            "Metadata calls  [free]",
+            f"{s['total_metadata_api_calls']}   avg {s['avg_meta_calls_per_detection']:.2f} / door",
+        )
         print_fn(DIV)
         print_fn(f"  ESTIMATED COST  ({cur}{s['cost_per_image_call']:.4f} / image call)")
-        row("Total run cost",             f"{cur}{s['total_cost']:.4f}")
-        row("Avg cost per door number",   f"{cur}{s['avg_cost_per_detection']:.4f}")
+        row("Total run cost", f"{cur}{s['total_cost']:.4f}")
+        row("Avg cost per door number", f"{cur}{s['avg_cost_per_detection']:.4f}")
         print_fn(SEP)
         print_fn("")
 

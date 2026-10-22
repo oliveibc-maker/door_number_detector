@@ -3,15 +3,22 @@
 import re
 from collections.abc import Callable
 
-
 KEYWORD_PATTERN = re.compile(
     r"\b(LOTE|LOT|SECTOR|SEC|BLOCO|BL|APARTAMENTO|APT|FRACCAO|FRACAO)\s*(\d{1,4})\b",
     re.IGNORECASE,
 )
 DOOR_NUMBER_PATTERN = re.compile(r"[A-Za-z]?\d{1,4}[A-Za-z]?")
 BLOCKLIST: set[str] = {
-    "2024G", "2023G", "2022G", "2025G", "2026G",
-    "G000", "G001", "G002", "G003", "G004",
+    "2024G",
+    "2023G",
+    "2022G",
+    "2025G",
+    "2026G",
+    "G000",
+    "G001",
+    "G002",
+    "G003",
+    "G004",
 }
 
 

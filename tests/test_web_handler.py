@@ -7,9 +7,9 @@ import threading
 import types
 import unittest
 from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
-from http.server import ThreadingHTTPServer
 
 from door_number_detector.core.models import DetectionResult
 
@@ -36,14 +36,24 @@ def _load_app_with_stubs():
     metrics_module.RunMetrics = Metrics
     batch_module.run_detection_batch = lambda *args, **kwargs: None
     batch_module.run_excel_batch = lambda *args, **kwargs: None
+    sources_module.FILTER_COLUMNS = {
+        "localidade": "NOME_LOCALIDADE",
+        "freguesia": "NOME_FREGUESIA",
+        "concelho": "NOME_CONCELHO",
+        "rua": "ID_RUA",
+    }
+    sources_module.SourceFilter = str
     sources_module.query_sqlserver = lambda *args, **kwargs: None
     sources_module.read_excel_any = lambda path: Workbook()
 
-    with patch.dict(sys.modules, {
-        "door_number_detector.core.metrics": metrics_module,
-        "door_number_detector.core.batch": batch_module,
-        "door_number_detector.core.sources": sources_module,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "door_number_detector.core.metrics": metrics_module,
+            "door_number_detector.core.batch": batch_module,
+            "door_number_detector.core.sources": sources_module,
+        },
+    ):
         return importlib.import_module("door_number_detector.web.app")
 
 
@@ -65,14 +75,16 @@ class WebHandlerTests(unittest.TestCase):
         self.original_output_dir = self.app.OUTPUT_DIR
         self.app.UPLOAD_DIR = Path(self.upload_dir.name)
         self.app.OUTPUT_DIR = Path(self.upload_dir.name) / "outputs"
-        self.app._state.update({
-            "running": False,
-            "csv_path": None,
-            "total": 0,
-            "error": None,
-            "cancel_event": None,
-            "metrics": None,
-        })
+        self.app._state.update(
+            {
+                "running": False,
+                "csv_path": None,
+                "total": 0,
+                "error": None,
+                "cancel_event": None,
+                "metrics": None,
+            }
+        )
         handler = type(
             "TestDoorNumberRequestHandler",
             (self.app.DoorNumberRequestHandler,),
@@ -118,9 +130,7 @@ class WebHandlerTests(unittest.TestCase):
         status, _ = self._request("POST", "/api/reset")
         self.assertEqual(status, 403)
 
-        status, _ = self._request(
-            "POST", "/api/reset", headers={"X-CSRF-Token": "test-csrf-token"}
-        )
+        status, _ = self._request("POST", "/api/reset", headers={"X-CSRF-Token": "test-csrf-token"})
         self.assertEqual(status, 200)
 
     def test_analysis_errors_return_generic_json_and_release_the_job_slot(self):
@@ -210,11 +220,14 @@ class WebHandlerTests(unittest.TestCase):
     def test_docker_healthcheck_accepts_the_running_authenticated_server(self):
         from door_number_detector.web.healthcheck import main
 
-        with patch.dict("os.environ", {
-            "WEB_USERNAME": "tester",
-            "WEB_PASSWORD": "secret",
-            "WEB_PORT": str(self.server.server_port),
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "WEB_USERNAME": "tester",
+                "WEB_PASSWORD": "secret",
+                "WEB_PORT": str(self.server.server_port),
+            },
+        ):
             main()
 
     def test_upload_rejects_unsupported_extension_and_oversize_body(self):
@@ -225,9 +238,7 @@ class WebHandlerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
 
-        status, _ = self._request(
-            "POST", "/api/upload?filename=doors.xlsx", b"123456789", headers
-        )
+        status, _ = self._request("POST", "/api/upload?filename=doors.xlsx", b"123456789", headers)
         self.assertEqual(status, 413)
         self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
 
@@ -248,8 +259,9 @@ class WebHandlerTests(unittest.TestCase):
             worker_finished.set()
 
         try:
-            with patch.object(self.app, "run_excel_batch", side_effect=hold_worker), patch.object(
-                self.app, "_finish_job", side_effect=signal_finish
+            with (
+                patch.object(self.app, "run_excel_batch", side_effect=hold_worker),
+                patch.object(self.app, "_finish_job", side_effect=signal_finish),
             ):
                 status, _ = self._request(
                     "POST",

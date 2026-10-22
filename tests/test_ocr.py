@@ -19,11 +19,15 @@ class FakeOcrReader:
 class OcrServiceTests(unittest.TestCase):
     def test_upscales_image_and_ranks_candidates_by_confidence(self):
         box = [[0, 0], [1, 0], [1, 1], [0, 1]]
-        reader = FakeOcrReader([[
-            [box, ("12A", 0.88)],
-            [box, ("8", 0.96)],
-            [box, ("8", 0.91)],
-        ]])
+        reader = FakeOcrReader(
+            [
+                [
+                    [box, ("12A", 0.88)],
+                    [box, ("8", 0.96)],
+                    [box, ("8", 0.91)],
+                ]
+            ]
+        )
         service = DoorNumberOCR(reader=reader)
         image = Image.fromarray(np.zeros((3, 4, 3), dtype=np.uint8), mode="RGB")
 

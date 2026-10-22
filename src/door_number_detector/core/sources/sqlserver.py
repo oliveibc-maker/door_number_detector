@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import pandas as pd
+
     from door_number_detector.core.config import Config
 
 
 logger = logging.getLogger(__name__)
+
+SourceFilter = Literal["localidade", "freguesia", "concelho", "rua"]
 
 FILTER_COLUMNS = {
     "localidade": "NOME_LOCALIDADE",
@@ -25,16 +28,14 @@ def _odbc_value(value: str) -> str:
 
 
 def query_sqlserver(
-    filter_by: Literal["localidade", "freguesia", "concelho", "rua"],
+    filter_by: SourceFilter,
     filter_value: str,
     config: Config,
 ) -> pd.DataFrame:
     import pandas as pd
 
     if filter_by not in FILTER_COLUMNS:
-        raise ValueError(
-            f"filter_by must be one of {list(FILTER_COLUMNS)}, got '{filter_by}'"
-        )
+        raise ValueError(f"filter_by must be one of {list(FILTER_COLUMNS)}, got '{filter_by}'")
 
     column = FILTER_COLUMNS[filter_by]
     import pyodbc
@@ -67,7 +68,9 @@ def query_sqlserver(
           AND ESTADO_PORTA NOT IN (N'Sinónimo', N'Apagado')
     """
 
-    logger.info("Connecting to source database %s / %s", config.src_db_server, config.src_db_database)
+    logger.info(
+        "Connecting to source database %s / %s", config.src_db_server, config.src_db_database
+    )
     logger.info("Querying source rows by %s", column)
     connection = pyodbc.connect(connection_string, timeout=30)
     try:

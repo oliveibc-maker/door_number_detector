@@ -9,7 +9,11 @@ from door_number_detector.core.config import Config
 
 
 def configure_logging(data_dir: Path | None = None) -> Path:
-    log_path = (Path(data_dir) if data_dir is not None else Config().data_dir) / "logs" / "door_detector.log"
+    log_path = (
+        (Path(data_dir) if data_dir is not None else Config().data_dir)
+        / "logs"
+        / "door_detector.log"
+    )
     log_path.parent.mkdir(parents=True, exist_ok=True)
     root_logger = logging.getLogger()
     handler_name = f"door_number_detector:{log_path}"
@@ -22,7 +26,7 @@ def configure_logging(data_dir: Path | None = None) -> Path:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
-    handlers = [
+    handlers: list[logging.Handler] = [
         RotatingFileHandler(
             log_path,
             maxBytes=10 * 1024 * 1024,

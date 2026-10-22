@@ -11,8 +11,8 @@ if TYPE_CHECKING:
 
 def read_spreadsheetml(path: Path) -> pd.DataFrame:
     """Parse the XML spreadsheet format emitted by the browser template."""
-    from defusedxml import ElementTree as ET
     import pandas as pd
+    from defusedxml import ElementTree as ET
 
     namespace = "urn:schemas-microsoft-com:office:spreadsheet"
     rows_data = []

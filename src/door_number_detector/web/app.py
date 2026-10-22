@@ -1,5 +1,5 @@
-import csv
 import base64
+import csv
 import hmac
 import json
 import logging
@@ -12,12 +12,18 @@ import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
+from door_number_detector.core.batch import run_detection_batch, run_excel_batch
 from door_number_detector.core.config import Config
 from door_number_detector.core.metrics import RunMetrics
-from door_number_detector.core.batch import run_detection_batch, run_excel_batch
-from door_number_detector.core.sources import query_sqlserver, read_excel_any
+from door_number_detector.core.sources import (
+    FILTER_COLUMNS,
+    SourceFilter,
+    query_sqlserver,
+    read_excel_any,
+)
 from door_number_detector.logging_config import configure_logging
 from door_number_detector.web.security import (
     UploadTooLarge,
@@ -28,11 +34,11 @@ from door_number_detector.web.security import (
     valid_csrf_token,
 )
 
-WEB_DIR       = Path(__file__).resolve().parent
-HTML_PATH     = WEB_DIR / "templates" / "index.html"
-DATA_DIR      = Config().data_dir
-UPLOAD_DIR    = DATA_DIR / "uploads"
-OUTPUT_DIR    = DATA_DIR / "outputs"
+WEB_DIR = Path(__file__).resolve().parent
+HTML_PATH = WEB_DIR / "templates" / "index.html"
+DATA_DIR = Config().data_dir
+UPLOAD_DIR = DATA_DIR / "uploads"
+OUTPUT_DIR = DATA_DIR / "outputs"
 
 # ── Lazy single detector ───────────────────────────────────────────────────────
 _detector = None
@@ -50,14 +56,15 @@ def get_detector():
                 _detector = DoorNumberDetector()
     return _detector
 
-_state = {
-    "running":      False,
-    "csv_path":     None,
-    "total":        0,
-    "error":        None,
+
+_state: dict[str, Any] = {
+    "running": False,
+    "csv_path": None,
+    "total": 0,
+    "error": None,
     "cancel_event": None,
-    "metrics":      None,
-    "worker":       None,
+    "metrics": None,
+    "worker": None,
 }
 _state_lock = threading.Lock()
 
@@ -67,12 +74,14 @@ def _claim_job(csv_path=None, total=None, metrics=None):
         if _state["running"]:
             return None
         cancel_event = threading.Event()
-        _state.update({
-            "running": True,
-            "error": None,
-            "cancel_event": cancel_event,
-            "worker": None,
-        })
+        _state.update(
+            {
+                "running": True,
+                "error": None,
+                "cancel_event": cancel_event,
+                "worker": None,
+            }
+        )
         if csv_path is not None:
             _state["csv_path"] = str(csv_path)
         if total is not None:
@@ -116,12 +125,15 @@ def _save_metrics(metrics: RunMetrics, csv_path: Path) -> None:
         _logger.warning(f"[batch] Could not save metrics: {exc}")
 
 
-def _run_batch(excel_path: Path, csv_path: Path, cancel_event: threading.Event, metrics: RunMetrics) -> None:
+def _run_batch(
+    excel_path: Path, csv_path: Path, cancel_event: threading.Event, metrics: RunMetrics
+) -> None:
     _logger.info(f"[batch] Excel batch starting — {excel_path.name}")
     error = None
     try:
         run_excel_batch(
-            excel_path, csv_path,
+            excel_path,
+            csv_path,
             detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
@@ -141,19 +153,24 @@ def _run_batch(excel_path: Path, csv_path: Path, cancel_event: threading.Event, 
 
 
 def _run_sqlserver_batch(
-    filter_by: str, filter_value: str, csv_path: Path,
-    cancel_event: threading.Event, metrics: RunMetrics,
+    filter_by: str,
+    filter_value: str,
+    csv_path: Path,
+    cancel_event: threading.Event,
+    metrics: RunMetrics,
 ) -> None:
     _logger.info(f"[batch] SQL batch starting — {filter_by}={filter_value!r}")
     error = None
     try:
         config = Config()
-        df = query_sqlserver(filter_by, filter_value, config)
+        df = query_sqlserver(cast(SourceFilter, filter_by), filter_value, config)
         with _state_lock:
             if _state.get("cancel_event") is cancel_event:
                 _state["total"] = len(df)
         run_detection_batch(
-            df, csv_path, set(),
+            df,
+            csv_path,
+            set(),
             detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
@@ -183,7 +200,6 @@ def _read_csv(path=None) -> list:
 
 
 class DoorNumberRequestHandler(BaseHTTPRequestHandler):
-
     auth_username = ""
     auth_password = ""
     csrf_token = ""
@@ -202,8 +218,12 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 raise ValueError("Unsupported authorization scheme")
             credentials = base64.b64decode(token, validate=True).decode("utf-8")
             username, password = credentials.split(":", 1)
-            valid = hmac.compare_digest(username.encode("utf-8"), self.auth_username.encode("utf-8"))
-            valid &= hmac.compare_digest(password.encode("utf-8"), self.auth_password.encode("utf-8"))
+            valid = hmac.compare_digest(
+                username.encode("utf-8"), self.auth_username.encode("utf-8")
+            )
+            valid &= hmac.compare_digest(
+                password.encode("utf-8"), self.auth_password.encode("utf-8")
+            )
         except (ValueError, UnicodeDecodeError):
             valid = False
         if valid:
@@ -263,14 +283,17 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             rows = _read_csv(state.get("csv_path"))
             m = state.get("metrics")
             metrics_summary = m.summary() if m else None
-            self._send_json(200, {
-                "running":   state["running"],
-                "total":     state["total"],
-                "processed": len(rows),
-                "error":     state["error"],
-                "rows":      rows,
-                "metrics":   metrics_summary,
-            })
+            self._send_json(
+                200,
+                {
+                    "running": state["running"],
+                    "total": state["total"],
+                    "processed": len(rows),
+                    "error": state["error"],
+                    "rows": rows,
+                    "metrics": metrics_summary,
+                },
+            )
 
         elif parsed.path == "/api/results":
             self._send_json(200, get_detector().db.get_results(limit=20))
@@ -293,15 +316,17 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 if running and ev is not None:
                     ev.set()
                 else:
-                    _state.update({
-                        "running":      False,
-                        "csv_path":     None,
-                        "total":        0,
-                        "error":        None,
-                        "cancel_event": None,
-                        "metrics":      None,
-                        "worker":       None,
-                    })
+                    _state.update(
+                        {
+                            "running": False,
+                            "csv_path": None,
+                            "total": 0,
+                            "error": None,
+                            "cancel_event": None,
+                            "metrics": None,
+                            "worker": None,
+                        }
+                    )
             if running:
                 self._send_json(202, {"status": "cancelling"})
                 return
@@ -325,16 +350,21 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
                 if workbook.empty or not required_columns.issubset(workbook.columns):
                     excel_path.unlink(missing_ok=True)
-                    self._send_json(400, {"error": "The spreadsheet is empty or missing required columns."})
+                    self._send_json(
+                        400, {"error": "The spreadsheet is empty or missing required columns."}
+                    )
                     return
             except Exception as exc:
                 excel_path.unlink(missing_ok=True)
                 _logger.warning("[upload] Rejected spreadsheet (%s).", type(exc).__name__)
-                self._send_json(400, {"error": "The uploaded file could not be read as a supported spreadsheet."})
+                self._send_json(
+                    400,
+                    {"error": "The uploaded file could not be read as a supported spreadsheet."},
+                )
                 return
             _logger.info("[upload] Accepted %s bytes as %s", len(data), excel_path.name)
 
-            ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             csv_path = OUTPUT_DIR / f"predictions_{ts}.csv"
 
@@ -359,28 +389,29 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
         elif parsed.path == "/api/run_sqlserver":
-            body = self._read_body(self.max_request_bytes)
-            if body is None:
+            raw_body = self._read_body(self.max_request_bytes)
+            if raw_body is None:
                 return
             try:
-                body = body.decode("utf-8")
+                decoded_body = raw_body.decode("utf-8")
             except UnicodeDecodeError:
                 self._send_json(400, {"error": "Request body must be UTF-8."})
                 return
-            data   = parse_qs(body, keep_blank_values=True)
+            form_data = parse_qs(decoded_body, keep_blank_values=True)
 
-            filter_by    = data.get("filter_by",    [""])[0].strip()
-            filter_value = data.get("filter_value", [""])[0].strip()
+            filter_by = form_data.get("filter_by", [""])[0].strip()
+            filter_value = form_data.get("filter_value", [""])[0].strip()
 
-            valid_filters = ["localidade", "freguesia", "concelho", "rua"]
+            valid_filters = list(FILTER_COLUMNS)
             if filter_by not in valid_filters or not filter_value:
                 self._send_json(400, {"error": "filter_by e filter_value são obrigatórios."})
                 return
+            filter_by = cast(SourceFilter, filter_by)
 
-            ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", filter_value).strip("_")[:80] or "filter"
             OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            csv_path  = OUTPUT_DIR / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
+            csv_path = OUTPUT_DIR / f"predictions_{filter_by}_{safe_name}_{ts}.csv"
 
             metrics = RunMetrics()
             cancel_event = _claim_job(csv_path, 0, metrics)
@@ -401,20 +432,20 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "started", "csv": csv_path.name})
 
         elif parsed.path == "/api/analyze":
-            body = self._read_body(self.max_request_bytes)
-            if body is None:
+            raw_body = self._read_body(self.max_request_bytes)
+            if raw_body is None:
                 return
             try:
-                body = body.decode("utf-8")
+                decoded_body = raw_body.decode("utf-8")
             except UnicodeDecodeError:
                 self._send_json(400, {"error": "Request body must be UTF-8."})
                 return
-            data   = parse_qs(body, keep_blank_values=True)
+            form_data = parse_qs(decoded_body, keep_blank_values=True)
             try:
-                lat = float(data.get("latitude",  [""])[0])
-                lon = float(data.get("longitude", [""])[0])
-                hdg = int(data.get("heading", ["0"])[0] or 0)
-                pit = int(data.get("pitch",   ["0"])[0] or 0)
+                lat = float(form_data.get("latitude", [""])[0])
+                lon = float(form_data.get("longitude", [""])[0])
+                hdg = int(form_data.get("heading", ["0"])[0] or 0)
+                pit = int(form_data.get("pitch", ["0"])[0] or 0)
             except ValueError:
                 self._send_json(400, {"error": "Coordinates and camera angles must be numeric."})
                 return
@@ -426,7 +457,9 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 or not 0 <= hdg <= 359
                 or not -90 <= pit <= 90
             ):
-                self._send_json(400, {"error": "Coordinates or camera angles are outside valid ranges."})
+                self._send_json(
+                    400, {"error": "Coordinates or camera angles are outside valid ranges."}
+                )
                 return
             cancel_event = _claim_job(total=1)
             if cancel_event is None:
@@ -505,6 +538,7 @@ def create_server(host=None, port=None):
     )
     server_class = DoorNumberHTTPServer
     if ":" in host:
+
         class IPv6ThreadingHTTPServer(DoorNumberHTTPServer):
             address_family = socket.AF_INET6
 
@@ -519,7 +553,7 @@ def _handle_sigterm(_signum, _frame):
 def main():
     configure_logging()
     signal.signal(signal.SIGTERM, _handle_sigterm)
-    server   = create_server()
+    server = create_server()
     removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
     if removed_uploads:
         _logger.info("Removed %s abandoned uploaded workbook(s).", removed_uploads)
