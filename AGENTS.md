@@ -16,6 +16,7 @@
 - Keep deployment assumptions explicit: one active job per process, one application instance for SQLite, persistent state under `APP_DATA_DIR`, and remote access only through a same-host HTTPS reverse proxy.
 - Do not make live Street View or company database calls in tests. Mock external services and use synthetic or sanitized fixtures.
 - Update README or flowcharts when a user-visible workflow, configuration, or architecture changes.
+- Write commit subjects as `type(scope): imperative summary` in lowercase, e.g. `fix(security): protect uploads and add CSRF checks`. Common types: `feat`, `fix`, `refactor`, `docs`, `chore`.
 
 ## Setup and Checks
 

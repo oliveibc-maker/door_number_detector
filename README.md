@@ -209,7 +209,7 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 │       ├── app.py                # Authenticated loopback HTTP server
 │       ├── healthcheck.py        # Container readiness check
 │       └── templates/            # Web app and offline CSV viewer
-├── tests/                        # Security and request lifecycle tests
+├── tests/                        # unittest suite for core, sources, OCR, parsing and web
 ├── flowcharts/                   # English/Portuguese Mermaid sources
 ├── start.bat / start.ps1         # Windows start scripts
 ├── stop.bat  / stop.ps1          # Windows stop scripts
