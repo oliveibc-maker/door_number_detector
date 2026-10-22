@@ -47,6 +47,6 @@ USER app
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5m --retries=3 \
-    CMD ["python", "-m", "web.healthcheck"]
+    CMD ["python", "-m", "door_number_detector.web.healthcheck"]
 
 CMD ["door-number-detector-web"]

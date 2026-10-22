@@ -1,14 +1,7 @@
 """Main door number detection workflow."""
 
-import os
-os.environ["FLAGS_use_mkldnn"] = "0"
-os.environ["PADDLE_DISABLE_MKLDNN"] = "1"
-os.environ["FLAGS_enable_pir_in_executor"] = "0"
-
-import io
 import logging
 import re
-import sys
 import threading
 from collections import Counter
 from datetime import datetime
@@ -17,41 +10,19 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from core.config import Config
-from core.database import DatabaseManager
-from core.google_street_view import StreetViewFetcher, NoImageryAvailable
-from core.models import DetectionResult
-from core.ocr import DoorNumberOCR
-from core.sweep import StreetViewSweep
+from door_number_detector.core.config import Config
+from door_number_detector.core.database import DatabaseManager
+from door_number_detector.core.google_street_view import StreetViewFetcher, NoImageryAvailable
+from door_number_detector.core.models import DetectionResult
+from door_number_detector.core.ocr import DoorNumberOCR
+from door_number_detector.core.sweep import StreetViewSweep
 
 
-# ── UTF-8 safe logging (fixes cp1252 crash on Windows) ────────────────────────
-def _build_logger() -> logging.Logger:
-    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-
-    log_path = Config().data_dir / "logs" / "door_detector.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setFormatter(fmt)
-
-    utf8_stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    stream_handler = logging.StreamHandler(utf8_stream)
-    stream_handler.setFormatter(fmt)
-
-    log = logging.getLogger(__name__)
-    log.setLevel(logging.INFO)
-    log.handlers.clear()
-    log.addHandler(file_handler)
-    log.addHandler(stream_handler)
-    log.propagate = False
-    return log
-
-
-logger = _build_logger()
+logger = logging.getLogger(__name__)
 
 # ── Door number patterns ───────────────────────────────────────────────────────
 
-from core.parsing import BLOCKLIST, parse_ocr_text
+from door_number_detector.core.parsing import BLOCKLIST, parse_ocr_text
 
 
 class DoorNumberDetector:

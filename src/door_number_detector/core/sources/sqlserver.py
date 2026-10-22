@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import pandas as pd
-    from core.config import Config
+    from door_number_detector.core.config import Config
 
+
+logger = logging.getLogger(__name__)
 
 FILTER_COLUMNS = {
     "localidade": "NOME_LOCALIDADE",
@@ -64,8 +67,8 @@ def query_sqlserver(
           AND ESTADO_PORTA NOT IN (N'Sinónimo', N'Apagado')
     """
 
-    print(f"Connecting to {config.src_db_server} / {config.src_db_database} ...")
-    print(f"Filter: {column} = '{filter_value}'")
+    logger.info("Connecting to source database %s / %s", config.src_db_server, config.src_db_database)
+    logger.info("Querying source rows by %s", column)
     connection = pyodbc.connect(connection_string, timeout=30)
     try:
         dataframe = pd.read_sql(query, connection, params=[filter_value])
@@ -78,5 +81,5 @@ def query_sqlserver(
     dataframe["LATITUDE"] = pd.to_numeric(dataframe["LATITUDE"], errors="coerce")
     dataframe["LONGITUDE"] = pd.to_numeric(dataframe["LONGITUDE"], errors="coerce")
     dataframe = dataframe.dropna(subset=["LATITUDE", "LONGITUDE"]).reset_index(drop=True)
-    print(f"Loaded {len(dataframe)} rows for {column} = '{filter_value}'")
+    logger.info("Loaded %s rows for %s", len(dataframe), column)
     return dataframe

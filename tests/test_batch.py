@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from core.batch import run_detection_batch
-from core.models import DetectionResult
+from door_number_detector.core.batch import run_detection_batch
+from door_number_detector.core.models import DetectionResult
 
 
 class FakeStreetView:
@@ -43,7 +43,7 @@ class FakeMetrics:
     def record(self, **values):
         self.records.append(values)
 
-    def print_summary(self):
+    def print_summary(self, print_fn=print):
         return None
 
 

@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
-from core.ocr import DoorNumberOCR
+from door_number_detector.core.ocr import DoorNumberOCR
 
 
 class FakeOcrReader:

@@ -8,21 +8,18 @@ import re
 import secrets
 import signal
 import socket
-import sys
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR))
-
-from core.config import Config
-from core.metrics import RunMetrics
-from core.batch import run_detection_batch, run_excel_batch
-from core.sources import query_sqlserver, read_excel_any
-from web.security import (
+from door_number_detector.core.config import Config
+from door_number_detector.core.metrics import RunMetrics
+from door_number_detector.core.batch import run_detection_batch, run_excel_batch
+from door_number_detector.core.sources import query_sqlserver, read_excel_any
+from door_number_detector.logging_config import configure_logging
+from door_number_detector.web.security import (
     UploadTooLarge,
     is_loopback_host,
     new_upload_path,
@@ -40,7 +37,7 @@ OUTPUT_DIR    = DATA_DIR / "outputs"
 # ── Lazy single detector ───────────────────────────────────────────────────────
 _detector = None
 _detector_lock = threading.Lock()
-_logger  = logging.getLogger("core.detector")
+_logger = logging.getLogger(__name__)
 
 
 def get_detector():
@@ -48,7 +45,7 @@ def get_detector():
     if _detector is None:
         with _detector_lock:
             if _detector is None:
-                from core.detector import DoorNumberDetector
+                from door_number_detector.core.detector import DoorNumberDetector
 
                 _detector = DoorNumberDetector()
     return _detector
@@ -474,8 +471,9 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *_):
-        return
+    def log_message(self, format_string, *args):
+        status_code = args[-2] if len(args) >= 2 else "unknown"
+        _logger.info("HTTP %s %s", self.command, status_code)
 
 
 class DoorNumberHTTPServer(ThreadingHTTPServer):
@@ -519,21 +517,22 @@ def _handle_sigterm(_signum, _frame):
 
 
 def main():
+    configure_logging()
     signal.signal(signal.SIGTERM, _handle_sigterm)
     server   = create_server()
     removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
     if removed_uploads:
         _logger.info("Removed %s abandoned uploaded workbook(s).", removed_uploads)
-    print("=" * 50)
-    print("Door Number Detector — Web Server")
-    print("=" * 50)
-    print(f"Local:    http://127.0.0.1:{server.server_address[1]}")
-    print("=" * 50)
-    print("Press Ctrl+C to stop.")
+    _logger.info("=" * 50)
+    _logger.info("Door Number Detector — Web Server")
+    _logger.info("=" * 50)
+    _logger.info("Local:    http://127.0.0.1:%s", server.server_address[1])
+    _logger.info("=" * 50)
+    _logger.info("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("Stopped.")
+        _logger.info("Web server stop requested.")
     finally:
         with _state_lock:
             cancel_event = _state.get("cancel_event")

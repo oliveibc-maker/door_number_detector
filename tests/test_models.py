@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from core.models import DetectionResult
+from door_number_detector.core.models import DetectionResult
 
 
 class DetectionResultTests(unittest.TestCase):

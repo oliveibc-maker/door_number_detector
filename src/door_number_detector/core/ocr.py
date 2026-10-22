@@ -1,18 +1,22 @@
 """Image OCR and candidate ranking for door-number detection."""
 
 import logging
+import os
 from collections import Counter
 
 import cv2
 import numpy as np
 from PIL import Image
 
-from core.parsing import parse_ocr_text
+from door_number_detector.core.parsing import parse_ocr_text
 
 
 class DoorNumberOCR:
     def __init__(self, reader=None, logger: logging.Logger | None = None):
         if reader is None:
+            os.environ["FLAGS_use_mkldnn"] = "0"
+            os.environ["PADDLE_DISABLE_MKLDNN"] = "1"
+            os.environ["FLAGS_enable_pir_in_executor"] = "0"
             from paddleocr import PaddleOCR
 
             logger = logger or logging.getLogger(__name__)

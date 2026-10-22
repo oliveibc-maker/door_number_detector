@@ -37,10 +37,9 @@ class Config:
 
     @property
     def data_dir(self):
-        default = Path(__file__).resolve().parent.parent / "data"
-        configured = Path(os.getenv("APP_DATA_DIR", str(default))).expanduser()
+        configured = Path(os.getenv("APP_DATA_DIR", str(Path.cwd() / "data"))).expanduser()
         if not configured.is_absolute():
-            configured = Path(__file__).resolve().parent.parent / configured
+            configured = Path.cwd() / configured
         return configured.resolve()
 
     @property

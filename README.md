@@ -122,7 +122,7 @@ All POST requests require the `X-CSRF-Token` header. Browser requests use the to
 ### Option B: Run the web server manually
 
 ~~~bash
-python web/app.py
+python -m door_number_detector.web.app
 ~~~
 
 Then open **http://127.0.0.1:8080** in your browser.
@@ -144,7 +144,7 @@ Compose uses Linux host networking so the app remains bound to `127.0.0.1`; conf
 Set `SOURCE`, `FILTER_BY`, and `FILTER_VALUE` in `.env` for SQL Server, or set `SOURCE=excel` and `INPUT_EXCEL` for Excel, then:
 
 ~~~bash
-python entrypoint.py
+python -m door_number_detector.cli
 ~~~
 
 Supported sources:
@@ -179,7 +179,7 @@ Each run writes two files under `APP_DATA_DIR/outputs`:
 
 ### Offline CSV viewer
 
-To inspect an existing CSV without starting the server, open `web/templates/results_viewer.html` directly in a browser and select or drop the CSV file. This standalone viewer reads the selected file locally; it does not submit data to the application.
+To inspect an existing CSV without starting the server, open `src/door_number_detector/web/templates/results_viewer.html` directly in a browser and select or drop the CSV file. This standalone viewer reads the selected file locally; it does not submit data to the application.
 
 ---
 
@@ -191,23 +191,24 @@ To inspect an existing CSV without starting the server, open `web/templates/resu
 ├── compose.yaml                  # Single-instance POC deployment
 ├── pyproject.toml / uv.lock      # Runtime dependencies and lock
 ├── requirements.txt              # Generated pip-compatible dependency list
-├── entrypoint.py                 # CLI entry point (SQL Server or Excel batch)
-├── core/
-│   ├── config.py                 # Environment configuration
-│   ├── batch.py                  # Shared CSV/resume/detection orchestration
-│   ├── database.py               # SQLite result persistence
-│   ├── detector.py               # PaddleOCR detection workflow
-│   ├── google_street_view.py     # Street View API client
-│   ├── metrics.py                # Run-level performance and cost metrics
-│   └── sources/                  # Excel and SQL Server input adapters
-│       ├── excel.py
-│       └── sqlserver.py
-├── web/
-│   ├── app.py                    # Authenticated loopback HTTP server
-│   ├── healthcheck.py            # Container readiness check
-│   └── templates/
-│       ├── index.html            # Web application
-│       └── results_viewer.html   # Standalone offline CSV viewer
+├── src/door_number_detector/
+│   ├── cli.py                    # CLI entry point
+│   ├── core/
+│   │   ├── batch.py              # Shared CSV/resume/detection orchestration
+│   │   ├── config.py             # Environment configuration
+│   │   ├── database.py           # SQLite result persistence
+│   │   ├── detector.py           # Detection coordinator
+│   │   ├── google_street_view.py # Street View API client
+│   │   ├── logging_config.py     # Rotating root logger
+│   │   ├── models.py             # Typed detection result
+│   │   ├── ocr.py                # PaddleOCR image processing and scoring
+│   │   ├── parsing.py            # OCR text parsing
+│   │   ├── sweep.py              # Street View image sweep
+│   │   └── sources/              # Excel and SQL Server adapters
+│   └── web/
+│       ├── app.py                # Authenticated loopback HTTP server
+│       ├── healthcheck.py        # Container readiness check
+│       └── templates/            # Web app and offline CSV viewer
 ├── tests/                        # Security and request lifecycle tests
 ├── flowcharts/                   # English/Portuguese Mermaid sources
 ├── start.bat / start.ps1         # Windows start scripts

@@ -21,7 +21,7 @@ if ($bg -eq "True") {
     Write-Host "Starting server in background..." -ForegroundColor Cyan
     $proc = Start-Process `
         -FilePath $python `
-        -ArgumentList "-u `"$root\web\app.py`"" `
+        -ArgumentList "-u -m door_number_detector.web.app" `
         -WorkingDirectory $root `
         -WindowStyle Hidden `
         -RedirectStandardOutput "$root\server.log" `
@@ -37,5 +37,5 @@ if ($bg -eq "True") {
     }
 } else {
     Write-Host "Starting server in foreground..." -ForegroundColor Cyan
-    & $python -u "$root\web\app.py"
+    & $python -u -m door_number_detector.web.app
 }

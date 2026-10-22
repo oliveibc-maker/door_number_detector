@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 
-from core.sources import query_sqlserver, read_excel_any, read_spreadsheetml
+from door_number_detector.core.sources import query_sqlserver, read_excel_any, read_spreadsheetml
 
 
 SPREADSHEET_NAMESPACE = "urn:schemas-microsoft-com:office:spreadsheet"

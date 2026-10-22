@@ -2,23 +2,20 @@
 
 import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from core.batch import run_excel_batch, run_sqlserver_batch
-from core.config import Config
-
-if sys.stdout and hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
+from door_number_detector.core.batch import run_excel_batch, run_sqlserver_batch
+from door_number_detector.core.config import Config
+from door_number_detector.logging_config import configure_logging
 
 run_batch_predictions = run_excel_batch
 run_from_sqlserver = run_sqlserver_batch
 
 
 def main() -> None:
-    project_root = Path(__file__).resolve().parent
+    configure_logging()
+    project_root = Path.cwd()
     output_dir = Config().data_dir / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

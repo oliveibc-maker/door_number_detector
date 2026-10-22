@@ -5,7 +5,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from core.google_street_view import NoImageryAvailable
+from door_number_detector.core.google_street_view import NoImageryAvailable
 
 
 DEFAULT_FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [

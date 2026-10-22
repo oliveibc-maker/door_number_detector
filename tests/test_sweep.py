@@ -1,8 +1,8 @@
 import threading
 import unittest
 
-from core.google_street_view import NoImageryAvailable
-from core.sweep import StreetViewSweep
+from door_number_detector.core.google_street_view import NoImageryAvailable
+from door_number_detector.core.sweep import StreetViewSweep
 
 
 class FakeStreetView:

@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 
-from core.config import Config
-from core.metrics import RunMetrics
-from core.sources import query_sqlserver, read_excel_any
+from door_number_detector.core.config import Config
+from door_number_detector.core.metrics import RunMetrics
+from door_number_detector.core.sources import query_sqlserver, read_excel_any
 
 if TYPE_CHECKING:
-    from core.detector import DoorNumberDetector
+    from door_number_detector.core.detector import DoorNumberDetector
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,11 @@ def _get_resume_state(existing_csv: str | Path | None) -> tuple[set[tuple[float,
     if not existing_path.exists():
         raise FileNotFoundError(f"Existing CSV not found: {existing_path}")
     already_processed = load_already_processed(existing_path)
-    print(f"Resuming from {existing_path.name} — {len(already_processed)} rows already processed.")
+    logger.info(
+        "Resuming from %s — %s rows already processed.",
+        existing_path.name,
+        len(already_processed),
+    )
     return already_processed, existing_path
 
 
@@ -98,10 +102,14 @@ def run_detection_batch(
 
     skipped = len(dataframe) - len(rows_to_process)
     if skipped:
-        print(f"Skipping {skipped} already-processed row(s). {len(rows_to_process)} remaining.")
+        logger.info(
+            "Skipping %s already-processed row(s). %s remaining.",
+            skipped,
+            len(rows_to_process),
+        )
 
     if rows_to_process.empty:
-        print("Nothing to process — all rows already in the existing CSV.")
+        logger.info("Nothing to process — all rows already exist in the resume CSV.")
         return existing_path
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -112,11 +120,11 @@ def run_detection_batch(
             reader = csv.DictReader(input_file, delimiter=";")
             for row in reader:
                 _append_row_to_csv(output_path, [row.get(column, "") for column in OUTPUT_COLUMNS])
-        print(f"Copied {len(already_processed)} existing row(s) into {output_path.name}.")
+        logger.info("Copied %s existing row(s) into %s.", len(already_processed), output_path.name)
 
     owns_detector = detector_instance is None
     if owns_detector:
-        from core.detector import DoorNumberDetector
+        from door_number_detector.core.detector import DoorNumberDetector
 
         detector = DoorNumberDetector()
     else:
@@ -135,7 +143,7 @@ def run_detection_batch(
     try:
         for row_index, (_, row) in enumerate(rows_to_process.iterrows(), 1):
             if cancel_event is not None and cancel_event.is_set():
-                print(f"[{row_index}/{total}] Batch cancelled by user — stopping cleanly.")
+                logger.info("[%s/%s] Batch cancelled by user — stopping cleanly.", row_index, total)
                 break
 
             expected = str(row.get("NOME_COMPLETO_PORTA", "") or "").strip()
@@ -159,7 +167,7 @@ def run_detection_batch(
                         float(latitude), float(longitude), cancel_event=cancel_event
                     )
                     if cancel_event is not None and cancel_event.is_set():
-                        print(f"[{row_index}/{total}] Cancelled mid-detection — stopping.")
+                        logger.info("[%s/%s] Cancelled mid-detection — stopping.", row_index, total)
                         break
 
                     observation = result.observation
@@ -224,7 +232,15 @@ def run_detection_batch(
                 "✗ WRONG" if prediction_found == "YES" else
                 "? NOT FOUND"
             )
-            print(f"[{row_index}/{total}] expected={expected!r} predicted={prediction!r} ({confidence}%) {status}")
+            logger.info(
+                "[%s/%s] expected=%r predicted=%r (%s%%) %s",
+                row_index,
+                total,
+                expected,
+                prediction,
+                confidence,
+                status,
+            )
 
     except Exception as fatal:
         logger.critical("Fatal error at row %s/%s: %s", row_index, total, fatal, exc_info=True)
@@ -235,24 +251,26 @@ def run_detection_batch(
 
     cancelled = cancel_event is not None and cancel_event.is_set()
     if cancelled:
-        print(f"\nCancelled after {row_index} row(s). Partial results saved to {output_path}")
+        logger.info("Cancelled after %s row(s). Partial results saved to %s", row_index, output_path)
     else:
         addressable = total - no_imagery_count
-        print(
-            f"\nDone: {matches}/{total} matched "
-            f"({100 * matches / total:.1f}%) | "
-            f"{no_imagery_count} sem cobertura GSV | "
-            f"{errors} error(s)"
+        logger.info(
+            "Done: %s/%s matched (%.1f%%) | %s sem cobertura GSV | %s error(s)",
+            matches,
+            total,
+            100 * matches / total,
+            no_imagery_count,
+            errors,
         )
         if addressable:
-            print(f"Effective accuracy (excl. no imagery): {100 * matches / addressable:.1f}%")
-        print(f"Saved to {output_path}")
+            logger.info("Effective accuracy (excl. no imagery): %.1f%%", 100 * matches / addressable)
+        logger.info("Saved to %s", output_path)
 
-    metrics.print_summary()
+    metrics.print_summary(print_fn=logger.info)
     if owns_metrics:
         metrics_path = output_path.with_suffix(".metrics.json")
         metrics.save_json(metrics_path)
-        print(f"Metrics saved to {metrics_path.name}")
+        logger.info("Metrics saved to %s", metrics_path.name)
     return output_path
 
 

@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.scripts]
-door-number-detector = "entrypoint:main"
-door-number-detector-web = "web.app:main"
+door-number-detector = "door_number_detector.cli:main"
+door-number-detector-web = "door_number_detector.web.app:main"
 
 [dependency-groups]
 test = [
@@ -42,12 +42,11 @@ test = [
 ]
 
 [tool.setuptools]
-py-modules = ["entrypoint"]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["core*", "web*"]
+where = ["src"]
+include = ["door_number_detector*"]
 
 [tool.setuptools.package-data]
-web = ["templates/*.html"]
+"door_number_detector.web" = ["templates/*.html"]

@@ -43,7 +43,7 @@ class DetectorDependencyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.data_directory = tempfile.TemporaryDirectory()
         with patch.dict(os.environ, {"APP_DATA_DIR": cls.data_directory.name}):
-            from core.detector import DoorNumberDetector
+            from door_number_detector.core.detector import DoorNumberDetector
 
         cls.detector_type = DoorNumberDetector
 

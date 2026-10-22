@@ -11,13 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 
-from core.models import DetectionResult
+from door_number_detector.core.models import DetectionResult
 
 
 def _load_app_with_stubs():
-    metrics_module = types.ModuleType("core.metrics")
-    batch_module = types.ModuleType("core.batch")
-    sources_module = types.ModuleType("core.sources")
+    metrics_module = types.ModuleType("door_number_detector.core.metrics")
+    batch_module = types.ModuleType("door_number_detector.core.batch")
+    sources_module = types.ModuleType("door_number_detector.core.sources")
 
     class Metrics:
         def summary(self):
@@ -40,11 +40,11 @@ def _load_app_with_stubs():
     sources_module.read_excel_any = lambda path: Workbook()
 
     with patch.dict(sys.modules, {
-        "core.metrics": metrics_module,
-        "core.batch": batch_module,
-        "core.sources": sources_module,
+        "door_number_detector.core.metrics": metrics_module,
+        "door_number_detector.core.batch": batch_module,
+        "door_number_detector.core.sources": sources_module,
     }):
-        return importlib.import_module("web.app")
+        return importlib.import_module("door_number_detector.web.app")
 
 
 class WebHandlerTests(unittest.TestCase):
@@ -175,7 +175,7 @@ class WebHandlerTests(unittest.TestCase):
     def test_detector_factory_is_lazy_and_constructs_once(self):
         self.assertIsNone(self.original_detector)
         self.app._detector = None
-        detector_module = types.ModuleType("core.detector")
+        detector_module = types.ModuleType("door_number_detector.core.detector")
         created = []
 
         class LazyDetector:
@@ -188,7 +188,7 @@ class WebHandlerTests(unittest.TestCase):
 
         detector_module.DoorNumberDetector = build_detector
         try:
-            with patch.dict(sys.modules, {"core.detector": detector_module}):
+            with patch.dict(sys.modules, {"door_number_detector.core.detector": detector_module}):
                 first = self.app.get_detector()
                 second = self.app.get_detector()
             self.assertIs(first, second)
@@ -208,7 +208,7 @@ class WebHandlerTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["csrf_token"], "test-csrf-token")
 
     def test_docker_healthcheck_accepts_the_running_authenticated_server(self):
-        from web.healthcheck import main
+        from door_number_detector.web.healthcheck import main
 
         with patch.dict("os.environ", {
             "WEB_USERNAME": "tester",

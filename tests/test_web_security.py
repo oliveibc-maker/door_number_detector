@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from web.security import (
+from door_number_detector.web.security import (
     UploadTooLarge,
     is_loopback_host,
     new_upload_path,

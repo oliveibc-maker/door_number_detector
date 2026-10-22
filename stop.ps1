@@ -13,7 +13,7 @@ if (Test-Path $pidFile) {
     }
     Remove-Item $pidFile -Force
 } else {
-    $procs = Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*app.py*" }
+    $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*door_number_detector.web.app*" }
     if ($procs) {
         $procs | ForEach-Object {
             Stop-Process -Id $_.ProcessId -Force

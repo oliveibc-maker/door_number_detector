@@ -1,6 +1,6 @@
 import unittest
 
-from core.parsing import parse_ocr_text
+from door_number_detector.core.parsing import parse_ocr_text
 
 
 class OcrParsingTests(unittest.TestCase):
