@@ -16,13 +16,12 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-from paddleocr import PaddleOCR
 
 from core.config import Config
 from core.database import DatabaseManager
 from core.google_street_view import StreetViewFetcher, NoImageryAvailable
 from core.models import DetectionResult
+from core.ocr import DoorNumberOCR
 
 
 # ── UTF-8 safe logging (fixes cp1252 crash on Windows) ────────────────────────
@@ -93,17 +92,7 @@ class DoorNumberDetector:
             )
         )
 
-        if ocr_engine is None:
-            logger.info("Loading PaddleOCR model (first run downloads models)...")
-            ocr_engine = PaddleOCR(
-                lang="en",
-                use_angle_cls=True,
-                use_gpu=False,
-                show_log=False,
-                det_db_thresh=0.2,
-                det_db_box_thresh=0.4,
-            )
-        self._paddle_reader = ocr_engine
+        self.ocr = DoorNumberOCR(reader=ocr_engine, logger=logger)
         logger.info("Door Number Detector initialized (OCR engine: PaddleOCR)")
 
     def _save_debug_image(self, image, name, directory: Path | None = None):
@@ -114,10 +103,6 @@ class DoorNumberDetector:
         else:
             image.save(path)
         return path
-
-    def _upscale(self, image: np.ndarray, scale: int = 3) -> np.ndarray:
-        h, w = image.shape[:2]
-        return cv2.resize(image, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
 
     @staticmethod
     def _is_year_like(num: str) -> bool:
@@ -141,62 +126,6 @@ class DoorNumberDetector:
 
     def _is_bad_candidate(self, num: str) -> bool:
         return self._is_year_like(num) or self._is_suspicious_short(num)
-
-    def _extract_door_number(self, image: Image.Image) -> tuple[str | None, int]:
-        cv_img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
-        all_candidates: list[tuple[str, float]] = []
-
-        logger.info("OCR [PaddleOCR]: full image 2x upscale...")
-        full_2x = self._upscale(cv_img, scale=2)
-
-        def _run_paddleocr(scan_img: np.ndarray, tag: str) -> list:
-            ocr_result = self._paddle_reader.ocr(scan_img)
-            if not ocr_result:
-                return []
-            if isinstance(ocr_result[0], list) and len(ocr_result[0]) >= 2 and isinstance(ocr_result[0][1], tuple):
-                page = ocr_result
-            else:
-                page = ocr_result[0]
-            if not page:
-                return []
-            normalized_results = []
-            for line in page:
-                bbox, (text, conf) = line
-                for num in parse_ocr_text(text, logger.info):
-                    all_candidates.append((num, conf))
-                    logger.info(f"PaddleOCR [{tag}] '{num}' <- '{text}' ({conf * 100:.0f}%)")
-                normalized_results.append((bbox, text, conf))
-            return normalized_results
-
-        _run_paddleocr(full_2x, "full_2x")
-
-        if not all_candidates:
-            logger.info("No candidates found")
-            return None, 0
-
-        best_conf: dict[str, float] = {}
-        conf_sum:  dict[str, float] = {}
-
-        for num, conf in all_candidates:
-            if num not in best_conf or conf > best_conf[num]:
-                best_conf[num] = conf
-            conf_sum[num] = conf_sum.get(num, 0.0) + conf
-
-        def score(num: str) -> tuple:
-            vote_count = sum(1 for n, _ in all_candidates if n == num)
-            return (best_conf[num], vote_count, conf_sum[num])
-
-        best_number         = max(best_conf.keys(), key=score)
-        best_confidence_pct = int(best_conf[best_number] * 100)
-
-        vote_counts = Counter(num for num, _ in all_candidates)
-        logger.info(
-            f"Best: '{best_number}' ({best_confidence_pct}%) "
-            f"conf_sum={conf_sum[best_number]:.2f} "
-            f"votes={vote_counts[best_number]}/{len(all_candidates)}"
-        )
-        return best_number, best_confidence_pct
 
     _FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
         (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
@@ -309,7 +238,7 @@ class DoorNumberDetector:
                         debug_name = f"fov{fov_try}_offset{offset}_pitch{pitch_try}.png"
                         self._save_debug_image(candidate_image, debug_name, directory=pass_dir)
 
-                    number, confidence = self._extract_door_number(candidate_image)
+                    number, confidence = self.ocr.extract_door_number(candidate_image)
                     logger.info(
                         f"[{pass_label}] FOV={fov_try} offset={offset} pitch={pitch_try} -> "
                         f"'{number}' (confidence: {confidence}%)"
@@ -360,7 +289,7 @@ class DoorNumberDetector:
 
             if image is not None:
                 logger.info("Using supplied image instead of fetching from Street View")
-                number, confidence = self._extract_door_number(image)
+                number, confidence = self.ocr.extract_door_number(image)
                 logger.info(f"Supplied image -> '{number}' (confidence: {confidence}%)")
                 all_image_candidates.append({
                     "number":     number,

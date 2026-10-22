@@ -334,8 +334,10 @@ dependencies = [
 [package.dev-dependencies]
 test = [
     { name = "defusedxml" },
+    { name = "opencv-python" },
     { name = "openpyxl" },
     { name = "pandas" },
+    { name = "pillow" },
     { name = "python-dotenv" },
 ]
 
@@ -360,8 +362,10 @@ requires-dist = [
 [package.metadata.requires-dev]
 test = [
     { name = "defusedxml", specifier = "==0.7.1" },
+    { name = "opencv-python", specifier = "==4.6.0.66" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "pandas", specifier = "==2.3.3" },
+    { name = "pillow", specifier = "==12.3.0" },
     { name = "python-dotenv", specifier = "==1.2.2" },
 ]
 
