@@ -339,6 +339,8 @@ test = [
     { name = "pandas" },
     { name = "pillow" },
     { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "sqlalchemy" },
 ]
 
 [package.metadata]
@@ -367,6 +369,8 @@ test = [
     { name = "pandas", specifier = "==2.3.3" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "python-dotenv", specifier = "==1.2.2" },
+    { name = "requests", specifier = "==2.34.2" },
+    { name = "sqlalchemy", specifier = "==2.0.51" },
 ]
 
 [[package]]

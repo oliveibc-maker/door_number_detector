@@ -22,6 +22,7 @@ from core.database import DatabaseManager
 from core.google_street_view import StreetViewFetcher, NoImageryAvailable
 from core.models import DetectionResult
 from core.ocr import DoorNumberOCR
+from core.sweep import StreetViewSweep
 
 
 # ── UTF-8 safe logging (fixes cp1252 crash on Windows) ────────────────────────
@@ -93,6 +94,13 @@ class DoorNumberDetector:
         )
 
         self.ocr = DoorNumberOCR(reader=ocr_engine, logger=logger)
+        self.sweep = StreetViewSweep(
+            self.street_view,
+            self.ocr,
+            self._has_confident_result,
+            debug=self.config.debug,
+            logger=logger,
+        )
         logger.info("Door Number Detector initialized (OCR engine: PaddleOCR)")
 
     def _save_debug_image(self, image, name, directory: Path | None = None):
@@ -127,10 +135,6 @@ class DoorNumberDetector:
     def _is_bad_candidate(self, num: str) -> bool:
         return self._is_year_like(num) or self._is_suspicious_short(num)
 
-    _FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
-        (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
-    ]
-
     def _no_early_stop_number(self, num: str) -> bool:
         if num in ("20", "2", "24", "25", "202"):
             return True
@@ -160,112 +164,6 @@ class DoorNumberDetector:
             return False
 
         return True
-
-    # ── Per-position iteration ─────────────────────────────────────────────────
-    def _fetch_candidates(
-        self,
-        latitude: float,
-        longitude: float,
-        heading,
-        pass_label: str = "center",
-        pitch_override: int | None = None,
-        sweep: list | None = None,
-        cancel_event: threading.Event | None = None,
-    ) -> list[dict]:
-        fov_sweep = sweep if sweep is not None else self._FOV_SWEEP
-        all_image_candidates: list[dict] = []
-        done        = False
-        _no_imagery = False
-
-        for fov_try, fov_heading_offsets, fov_pitch_values in fov_sweep:
-            if done:
-                break
-            if cancel_event is not None and cancel_event.is_set():
-                logger.info(f"[{pass_label}] Cancelled — aborting FOV sweep.")
-                break
-
-            pitch_values = [pitch_override] if pitch_override is not None else fov_pitch_values
-
-            for pitch_try in pitch_values:
-                if done:
-                    break
-                if cancel_event is not None and cancel_event.is_set():
-                    logger.info(f"[{pass_label}] Cancelled — aborting pitch loop.")
-                    done = True
-                    break
-
-                for offset in fov_heading_offsets:
-                    if cancel_event is not None and cancel_event.is_set():
-                        logger.info(
-                            f"[{pass_label}] Cancelled at offset={offset} — "
-                            f"aborting heading sweep."
-                        )
-                        done = True
-                        break
-
-                    logger.info(
-                        f"[{pass_label}] Trying FOV={fov_try} offset={offset} pitch={pitch_try}"
-                    )
-
-                    try:
-                        candidate_image = self.street_view.get_image(
-                            latitude,
-                            longitude,
-                            heading=heading,
-                            heading_offset=offset,
-                            pitch=pitch_try,
-                            fov=fov_try,
-                        )
-                    except NoImageryAvailable:
-                        logger.warning(
-                            f"[{pass_label}] No Street View imagery for "
-                            f"({latitude}, {longitude}) — aborting sweep."
-                        )
-                        _no_imagery = True
-                        done = True
-                        break
-
-                    if candidate_image is None:
-                        logger.warning(
-                            f"[{pass_label}] No image returned for "
-                            f"offset={offset} pitch={pitch_try}"
-                        )
-                        continue
-
-                    if self.config.debug:
-                        pass_dir = (self.current_debug_house_dir or self.debug_dir) / pass_label
-                        pass_dir.mkdir(parents=True, exist_ok=True)
-                        debug_name = f"fov{fov_try}_offset{offset}_pitch{pitch_try}.png"
-                        self._save_debug_image(candidate_image, debug_name, directory=pass_dir)
-
-                    number, confidence = self.ocr.extract_door_number(candidate_image)
-                    logger.info(
-                        f"[{pass_label}] FOV={fov_try} offset={offset} pitch={pitch_try} -> "
-                        f"'{number}' (confidence: {confidence}%)"
-                    )
-
-                    all_image_candidates.append({
-                        "number":     number,
-                        "confidence": confidence,
-                        "heading":    offset,
-                        "pitch":      pitch_try,
-                        "fov":        fov_try,
-                    })
-
-                    if self._has_confident_result(all_image_candidates):
-                        logger.info(
-                            f"[{pass_label}] Confident result at FOV={fov_try} "
-                            f"offset={offset} pitch={pitch_try} — stopping sweep."
-                        )
-                        done = True
-                        break
-
-        if _no_imagery:
-            raise NoImageryAvailable(
-                f"No Street View imagery available for ({latitude}, {longitude})"
-            )
-
-        return all_image_candidates
 
     def detect_door_number(
         self,
@@ -335,12 +233,13 @@ class DoorNumberDetector:
 
                 # Pass 1 — direct heading, normal offsets (±30°)
                 logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
-                all_image_candidates = self._fetch_candidates(
+                all_image_candidates = self.sweep.fetch_candidates(
                     latitude, longitude, _base_heading,
                     pass_label="direct",
                     pitch_override=pitch,
-                    sweep=self._FOV_SWEEP,
                     cancel_event=cancel_event,
+                    debug_directory=self.current_debug_house_dir or self.debug_dir,
+                    save_debug_image=self._save_debug_image,
                 )
 
             if not all_image_candidates:
