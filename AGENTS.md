@@ -40,3 +40,17 @@ uv run --locked --no-sync python -m unittest discover -s tests -v
 ```
 
 Run focused tests while iterating. Do not weaken lint, type, or test settings just to make a change pass; fix the underlying issue or explain a justified exception.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub Issues via `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repo uses a single-context domain-doc layout. See `docs/agents/domain.md`.
