@@ -1,4 +1,4 @@
-﻿$root = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $pidFile = "$root\server.pid"
 
 Write-Host "Stopping Door Number Detector..." -ForegroundColor Cyan

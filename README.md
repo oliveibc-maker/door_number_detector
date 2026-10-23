@@ -99,27 +99,39 @@ Get a Google Street View API key from: https://developers.google.com/maps/docume
 Double-click:
 
 ~~~
-start.bat   — starts the web server
-stop.bat    — stops the web server
+scripts/windows/start.bat   — starts the web server
+scripts/windows/stop.bat    — stops the web server
 ~~~
 
 Or run from CMD:
 
 ~~~
-.\start.bat   — starts the web server
-.\stop.bat    — stops the web server
+.\scripts\windows\start.bat   — starts the web server
+.\scripts\windows\stop.bat    — stops the web server
 ~~~
 
 
-`start.bat` reads `RUN_IN_BACKGROUND` from `.env`:
+`RUN_IN_BACKGROUND` in `.env` controls the launcher mode:
 - `False` → runs in the current window (logs visible)
-- `True` → runs hidden; logs go to `server.log` / `server_error.log`; PID saved to `server.pid`
+- `True` → runs hidden on Windows or in the background on Linux, WSL, and macOS; logs go to `server.log` / `server_error.log`; PID saved to `server.pid`
 
 Then open **http://127.0.0.1:8080** in your browser.
 The browser will prompt for the configured web credentials. The application only binds to loopback. For remote access, terminate HTTPS at a reverse proxy on the same host and have it forward to `127.0.0.1:8080`. Uploads are limited to 25 MiB by default; adjust `MAX_UPLOAD_BYTES` if your spreadsheets require more space.
 All POST requests require the `X-CSRF-Token` header. Browser requests use the token embedded in the page; authenticated API clients can fetch it from `GET /api/csrf` and must send it with each POST.
 
-### Option B: Run the web server manually
+### Option B: Linux, WSL, and macOS
+
+From the repository root, run:
+
+~~~sh
+./scripts/unix/start.sh
+~~~
+
+Use `./scripts/unix/stop.sh` to stop a background server. The scripts use the project `.venv` and `.env`.
+
+Then open **http://127.0.0.1:8080** in your browser.
+
+### Option C: Run the web server manually
 
 ~~~bash
 python -m door_number_detector.web.app
@@ -127,7 +139,7 @@ python -m door_number_detector.web.app
 
 Then open **http://127.0.0.1:8080** in your browser.
 
-### Option C: Run in Docker on Linux
+### Option D: Run in Docker on Linux
 
 Create `.env` as described above, then run:
 
@@ -139,7 +151,7 @@ docker compose logs -f door-number-detector
 
 Compose uses Linux host networking so the app remains bound to `127.0.0.1`; configure a same-host HTTPS reverse proxy to reach it remotely. SQLite, outputs, uploads, and the PaddleOCR model cache use the persistent `door_detector_data` volume. SQL Server authentication uses `SRC_DB_TRUSTED=False` and the configured SQL credentials in `.env`. Run one instance only: job coordination is process-local and SQLite is not configured for multi-instance access.
 
-### Option D: Run the CLI directly
+### Option E: Run the CLI directly
 
 Set `SOURCE`, `FILTER_BY`, and `FILTER_VALUE` in `.env` for SQL Server, or set `SOURCE=excel` and `INPUT_EXCEL` for Excel, then:
 
@@ -211,8 +223,9 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 │       └── templates/            # Web app and offline CSV viewer
 ├── tests/                        # unittest suite for core, sources, OCR, parsing and web
 ├── flowcharts/                   # English/Portuguese Mermaid sources
-├── start.bat / start.ps1         # Windows start scripts
-├── stop.bat  / stop.ps1          # Windows stop scripts
+├── scripts/
+│   ├── windows/                  # Windows start/stop scripts
+│   └── unix/                     # Linux, WSL, and macOS start/stop scripts
 ├── .github/workflows/tests.yml   # Python 3.11 CI
 ├── .env.example                  # Environment template
 └── data/                          # Ignored local runtime data

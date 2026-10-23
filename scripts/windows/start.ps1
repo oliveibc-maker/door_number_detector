@@ -1,4 +1,4 @@
-﻿$root   = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$root   = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $python = "$root\.venv\Scripts\python.exe"
 
 if (-not (Test-Path $python)) {
