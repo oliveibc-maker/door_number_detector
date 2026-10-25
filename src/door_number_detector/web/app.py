@@ -616,16 +616,16 @@ def _close_detector():
 def main():
     start_process()
     server = create_server()
-    removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
-    if removed_uploads:
-        _logger.info("Removed %s abandoned uploaded workbook(s).", removed_uploads)
-    _logger.info("=" * 50)
-    _logger.info("Door Number Detector — Web Server")
-    _logger.info("=" * 50)
-    _logger.info("Local:    http://127.0.0.1:%s", server.server_address[1])
-    _logger.info("=" * 50)
-    _logger.info("Press Ctrl+C to stop.")
     try:
+        removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
+        if removed_uploads:
+            _logger.info("Removed %s abandoned uploaded workbook(s).", removed_uploads)
+        _logger.info("=" * 50)
+        _logger.info("Door Number Detector — Web Server")
+        _logger.info("=" * 50)
+        _logger.info("Local:    http://127.0.0.1:%s", server.server_address[1])
+        _logger.info("=" * 50)
+        _logger.info("Press Ctrl+C to stop.")
         server.serve_forever()
     except KeyboardInterrupt:
         _logger.info("Web server stop requested.")

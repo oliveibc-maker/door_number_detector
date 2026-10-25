@@ -214,6 +214,19 @@ class RuntimeLifecycleTests(unittest.TestCase):
 
         self.assertEqual(self.events[-2:], ["server_close", "detector_close"])
 
+    def test_shutdown_runs_when_startup_cleanup_fails_after_the_server_is_created(self):
+        self.app._detector = _FakeDetector(self.events)
+        server = _FakeServer(self.events, lambda: None)
+
+        with (
+            patch.object(self.app, "create_server", return_value=server),
+            patch.object(self.app, "remove_orphaned_uploads", side_effect=OSError("boom")),
+        ):
+            with self.assertRaises(OSError):
+                self.app.main()
+
+        self.assertEqual(self.events, ["paddle_loaded", "server_close", "detector_close"])
+
     def test_startup_removes_abandoned_uploads_only(self):
         abandoned = self.app.UPLOAD_DIR / ("a" * 32 + ".xlsx")
         unrelated = self.app.UPLOAD_DIR / "notes.txt"
