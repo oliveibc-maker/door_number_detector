@@ -400,7 +400,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             _logger.info("[upload] Accepted %s bytes as %s", len(data), excel_path.name)
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            csv_path = OUTPUT_DIR / f"predictions_{ts}.csv"
             if cancel_event.is_set():
                 _finish_job(cancel_event)
                 _remove_uploaded_workbook(excel_path)
@@ -408,6 +407,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 return
             try:
                 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                csv_path = OUTPUT_DIR / f"predictions_{ts}.csv"
                 metrics = RunMetrics()
             except Exception as exc:
                 _finish_job(cancel_event)
@@ -599,7 +599,7 @@ def create_server(host=None, port=None):
     return server_class((host, port), handler)
 
 
-def _cancel_active_job():
+def _cancel_active_job_and_get_worker():
     """Set the running batch's cancel event and return its worker, if any."""
     with _state_lock:
         cancel_event = _state.get("cancel_event")
@@ -630,7 +630,7 @@ def main():
     except KeyboardInterrupt:
         _logger.info("Web server stop requested.")
     finally:
-        shutdown_process(server, _cancel_active_job, _close_detector)
+        shutdown_process(server, _cancel_active_job_and_get_worker, _close_detector)
 
 
 if __name__ == "__main__":

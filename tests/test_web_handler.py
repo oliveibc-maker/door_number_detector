@@ -550,7 +550,7 @@ class WebUploadWorkflowTests(unittest.TestCase):
                 "max_upload_bytes": 1024 * 1024,
             },
         )
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = self.app.DoorNumberHTTPServer(("127.0.0.1", 0), handler)
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.start()
         self.batch_finished = threading.Event()
@@ -636,6 +636,15 @@ class WebUploadWorkflowTests(unittest.TestCase):
             self.assertTrue(self.batch_finished.wait(10))
 
         self.assertEqual(read_excel.call_count, 1)
+
+    def test_unexpected_worker_start_failure_releases_the_job_and_upload(self):
+        with patch.object(self.app, "_start_worker", side_effect=ValueError("boom")):
+            status, body = self._upload(_workbook_bytes(VALID_ROWS, VALID_COLUMNS))
+
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"boom", body)
+        self.assertFalse(self.app._state["running"])
+        self.assertEqual(self._uploaded_files(), [])
 
     def test_output_directory_failure_removes_the_upload_without_leaking_paths(self):
         def fail_mkdir(*args, **kwargs):

@@ -19,7 +19,7 @@ from typing import Any, Protocol
 from door_number_detector.logging_config import configure_logging
 
 
-class _Closable(Protocol):
+class _ClosableServer(Protocol):
     def server_close(self) -> None: ...
 
 
@@ -35,19 +35,19 @@ def start_process() -> None:
 
 
 def shutdown_process(
-    server: _Closable,
-    cancel_job: Callable[[], Any],
+    server: _ClosableServer,
+    cancel_and_get_worker: Callable[[], Any],
     close_detector: Callable[[], None],
 ) -> None:
     """Stop the batch, close the server, wait for the worker, close the detector.
 
-    `cancel_job` sets the running batch's cancel event, if any, and returns its
+    `cancel_and_get_worker` sets the running batch's cancel event, if any, and returns its
     worker thread (or None). It is called again after the server closes, because
     closing waits for in-flight requests that may have started a job.
     """
-    cancel_job()
+    cancel_and_get_worker()
     server.server_close()
-    worker = cancel_job()
+    worker = cancel_and_get_worker()
     if worker is not None and worker is not threading.current_thread():
         worker.join()
     close_detector()
