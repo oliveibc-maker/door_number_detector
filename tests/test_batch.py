@@ -74,6 +74,29 @@ class BatchTests(unittest.TestCase):
                     with self.assertRaises(InvalidExcelWorkbookError):
                         load_excel_dataframe(input_path)
 
+    def test_excel_batch_rejects_invalid_workbooks_before_detecting(self):
+        workbooks = {
+            "empty": pd.DataFrame(columns=["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]),
+            "missing column": pd.DataFrame([{"NOME_COMPLETO_PORTA": "1", "LATITUDE": 41.2}]),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, workbook in workbooks.items():
+                input_path = root / f"{name.replace(' ', '_')}.xlsx"
+                workbook.to_excel(input_path, index=False)
+                output_path = root / f"{input_path.stem}.csv"
+                detector = FakeDetector([])
+                with self.subTest(workbook=name):
+                    with self.assertRaises(InvalidExcelWorkbookError):
+                        run_excel_batch(
+                            input_path,
+                            output_path,
+                            detector_instance=detector,
+                            metrics=FakeMetrics(),
+                        )
+                    self.assertEqual(detector.calls, [])
+                    self.assertFalse(output_path.exists())
+
     def test_excel_batch_reuses_a_preloaded_workbook(self):
         dataframe = pd.DataFrame(
             [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
