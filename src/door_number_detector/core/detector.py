@@ -12,8 +12,9 @@ from door_number_detector.core.candidate_selection import Candidate, CandidateSe
 from door_number_detector.core.config import Config
 from door_number_detector.core.database import DatabaseManager
 from door_number_detector.core.google_street_view import NoImageryAvailable, StreetViewFetcher
-from door_number_detector.core.models import DetectionResult
+from door_number_detector.core.models import DetectionOutcome, DetectionResult
 from door_number_detector.core.ocr import DoorNumberOCR
+from door_number_detector.core.outcomes import OUTCOME_DETAILS
 from door_number_detector.core.redaction import redact_api_key
 from door_number_detector.core.sweep import StreetViewSweep
 
@@ -73,6 +74,34 @@ class DoorNumberDetector:
             image.save(path)
         return path
 
+    def _usage_since(self, before: tuple[int, int], enabled: bool) -> tuple[int, int]:
+        if not enabled:
+            return 0, 0
+        after = self.street_view.get_call_counts()
+        return after[0] - before[0], after[1] - before[1]
+
+    def _finish_result(self, result: DetectionResult) -> DetectionResult:
+        if result.outcome is DetectionOutcome.CANCELLED:
+            return result
+        try:
+            self.db.save_result(result.to_dict())
+        except Exception:
+            logger.error("Could not save detection result", exc_info=True)
+            if result.outcome is DetectionOutcome.FAILED:
+                return result
+            details = OUTCOME_DETAILS[DetectionOutcome.FAILED]
+            return DetectionResult(
+                success=False,
+                outcome=DetectionOutcome.FAILED,
+                latitude=result.latitude,
+                longitude=result.longitude,
+                observation=details.observation,
+                error=details.database_message,
+                image_calls=result.image_calls,
+                metadata_calls=result.metadata_calls,
+            )
+        return result
+
     def detect_door_number(
         self,
         latitude,
@@ -84,6 +113,8 @@ class DoorNumberDetector:
     ) -> DetectionResult:
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
+        track_usage = image is None
+        usage_before = self.street_view.get_call_counts() if track_usage else (0, 0)
 
         try:
             if self.config.debug:
@@ -106,11 +137,14 @@ class DoorNumberDetector:
             else:
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
-                    return DetectionResult(
-                        success=False,
-                        latitude=latitude,
-                        longitude=longitude,
-                        error="Cancelled",
+                    return self._finish_result(
+                        DetectionResult(
+                            success=False,
+                            outcome=DetectionOutcome.CANCELLED,
+                            latitude=latitude,
+                            longitude=longitude,
+                            observation=OUTCOME_DETAILS[DetectionOutcome.CANCELLED].observation,
+                        )
                     )
 
                 _base_heading = heading
@@ -152,13 +186,35 @@ class DoorNumberDetector:
                     save_debug_image=self._save_debug_image,
                 )
 
+            if cancel_event is not None and cancel_event.is_set():
+                image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
+                return self._finish_result(
+                    DetectionResult(
+                        success=False,
+                        outcome=DetectionOutcome.CANCELLED,
+                        latitude=latitude,
+                        longitude=longitude,
+                        observation=OUTCOME_DETAILS[DetectionOutcome.CANCELLED].observation,
+                        image_calls=image_calls,
+                        metadata_calls=metadata_calls,
+                    )
+                )
+
             if not all_image_candidates:
                 logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
-                return DetectionResult(
-                    success=False,
-                    latitude=latitude,
-                    longitude=longitude,
-                    error="Image unavailable",
+                image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
+                details = OUTCOME_DETAILS[DetectionOutcome.IMAGE_UNAVAILABLE]
+                return self._finish_result(
+                    DetectionResult(
+                        success=False,
+                        outcome=DetectionOutcome.IMAGE_UNAVAILABLE,
+                        latitude=latitude,
+                        longitude=longitude,
+                        observation=details.observation,
+                        error=details.database_message,
+                        image_calls=image_calls,
+                        metadata_calls=metadata_calls,
+                    )
                 )
 
             best_candidate = self.candidate_selector.select(all_image_candidates)
@@ -182,15 +238,22 @@ class DoorNumberDetector:
                     f"Low confidence ({confidence}%). "
                     f"Requires at least {self.config.confidence_threshold}% to pass."
                 )
+            outcome = DetectionOutcome.FOUND if success else DetectionOutcome.LOW_CONFIDENCE
+            details = OUTCOME_DETAILS[outcome]
+            image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
             result = DetectionResult(
                 success=success,
+                outcome=outcome,
                 latitude=latitude,
                 longitude=longitude,
                 door_number=door_number if success else None,
                 confidence=confidence,
                 heading=heading,
                 pitch=pitch,
+                observation=details.observation,
                 error=error,
+                image_calls=image_calls,
+                metadata_calls=metadata_calls,
             )
 
             if not success:
@@ -200,32 +263,43 @@ class DoorNumberDetector:
             else:
                 logger.info(f"Result: {door_number} (confidence: {confidence}%)")
 
-            self.db.save_result(result.to_dict())
-            return result
+            return self._finish_result(result)
 
         except NoImageryAvailable:
             logger.warning(
                 f"No Street View imagery available for ({latitude}, {longitude}) — "
                 f"skipping OCR and recording observation."
             )
+            image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
+            details = OUTCOME_DETAILS[DetectionOutcome.NO_IMAGERY]
             result = DetectionResult(
                 success=False,
+                outcome=DetectionOutcome.NO_IMAGERY,
                 latitude=latitude,
                 longitude=longitude,
-                observation="No Street View imagery available",
+                observation=details.observation,
+                error=details.database_message,
+                image_calls=image_calls,
+                metadata_calls=metadata_calls,
             )
-            self.db.save_result(result.to_dict())
-            return result
+            return self._finish_result(result)
 
         except Exception as exc:
             message = redact_api_key(str(exc))
             logger.error(f"Error processing coordinate: {message}", exc_info=True)
-            return DetectionResult(
+            image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
+            details = OUTCOME_DETAILS[DetectionOutcome.FAILED]
+            result = DetectionResult(
                 success=False,
+                outcome=DetectionOutcome.FAILED,
                 latitude=latitude,
                 longitude=longitude,
-                error=message,
+                observation=details.observation,
+                error=details.database_message,
+                image_calls=image_calls,
+                metadata_calls=metadata_calls,
             )
+            return self._finish_result(result)
 
     def process_coordinates_batch(self, coordinates_list: list) -> list:
         results = []

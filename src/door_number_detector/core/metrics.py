@@ -34,14 +34,12 @@ class RunMetrics:
     metrics = RunMetrics(cost_per_image=0.007, currency="$")   # USD instead
 
     # inside the detection loop:
-    detector.street_view.reset_call_counts()
     t0 = time.perf_counter()
     result = detector.detect_door_number(lat, lon, ...)
     elapsed = time.perf_counter() - t0
-    img, meta = detector.street_view.get_call_counts()
-    metrics.record(elapsed, img, meta,
+    metrics.record(elapsed, result.image_calls, result.metadata_calls,
                    success=result.success,
-                   no_imagery=result.observation == _NO_IMAGERY_OBS)
+                   no_imagery=result.outcome == "no_imagery")
 
     # at the end of the run:
     metrics.print_summary()

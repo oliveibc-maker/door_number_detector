@@ -165,7 +165,7 @@ Each run writes two files under `APP_DATA_DIR/outputs`:
 | `CONFIDENCE` | OCR confidence (%) |
 | `PREDICTION_FOUND` | `YES` / `NO` / `NO_IMAGERY` |
 | `MATCH` | `YES` if the prediction matches the expected value, otherwise `NO` |
-| `OBSERVATION` | Additional result detail, including no-imagery status |
+| `OBSERVATION` | Empty when found; otherwise explains low confidence, missing imagery, unavailable images, or detection failure |
 
 ### Offline CSV viewer
 
@@ -187,6 +187,7 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 │   ├── runtime.py                # Process startup and shutdown order
 │   ├── core/
 │   │   ├── batch.py              # Shared CSV/resume/detection orchestration
+│   │   ├── candidate_selection.py # Shared candidate ranking and selection policy
 │   │   ├── config.py             # Environment configuration
 │   │   ├── database.py           # SQLite result persistence
 │   │   ├── detector.py           # Detection coordinator
@@ -194,6 +195,7 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 │   │   ├── metrics.py            # Per-run performance and cost metrics
 │   │   ├── models.py             # Typed detection result
 │   │   ├── ocr.py                # PaddleOCR image processing and scoring
+│   │   ├── outcomes.py           # Outcome mapping for CSV, database, and metrics
 │   │   ├── parsing.py            # OCR text parsing
 │   │   ├── redaction.py          # API-key redaction helper
 │   │   ├── sweep.py              # Street View image sweep

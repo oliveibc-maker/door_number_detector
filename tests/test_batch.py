@@ -15,29 +15,16 @@ from door_number_detector.core.batch import (
     run_excel_batch,
     run_sqlserver_batch,
 )
-from door_number_detector.core.models import DetectionResult
-
-
-class FakeStreetView:
-    def __init__(self):
-        self.counts = (3, 1)
-
-    def reset_call_counts(self):
-        self.counts = (0, 0)
-
-    def get_call_counts(self):
-        return self.counts
+from door_number_detector.core.models import DetectionOutcome, DetectionResult
 
 
 class FakeDetector:
     def __init__(self, results):
-        self.street_view = FakeStreetView()
         self.results = iter(results)
         self.calls = []
 
     def detect_door_number(self, latitude, longitude, cancel_event=None):
         self.calls.append((latitude, longitude))
-        self.street_view.counts = (3, 1)
         result = next(self.results)
         if isinstance(result, Exception):
             raise result
@@ -129,6 +116,8 @@ class BatchTests(unittest.TestCase):
                     longitude=-8.6,
                     door_number="12A",
                     confidence=91,
+                    image_calls=3,
+                    metadata_calls=1,
                 )
             ]
         )
@@ -162,6 +151,8 @@ class BatchTests(unittest.TestCase):
                     longitude=-8.6,
                     door_number="12A",
                     confidence=91,
+                    image_calls=3,
+                    metadata_calls=1,
                 )
             ]
         )
@@ -295,6 +286,8 @@ class BatchTests(unittest.TestCase):
                     longitude=-8.6,
                     door_number="12A",
                     confidence=91,
+                    image_calls=3,
+                    metadata_calls=1,
                 )
             ]
         )
@@ -377,6 +370,7 @@ class BatchTests(unittest.TestCase):
             [
                 DetectionResult(
                     success=False,
+                    outcome=DetectionOutcome.NO_IMAGERY,
                     latitude=41.2,
                     longitude=-8.6,
                     observation="No Street View imagery available",
@@ -399,6 +393,71 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(row["PREDICTION_FOUND"], "NO_IMAGERY")
         self.assertEqual(row["OBSERVATION"], "No Street View imagery available")
         self.assertTrue(metrics.records[0]["no_imagery"])
+
+    def test_each_outcome_maps_to_csv_and_metrics_without_detector_client_access(self):
+        cases = (
+            (DetectionOutcome.FOUND, "YES", "", True, False),
+            (
+                DetectionOutcome.LOW_CONFIDENCE,
+                "NO",
+                "Low confidence; manual review recommended.",
+                False,
+                False,
+            ),
+            (
+                DetectionOutcome.NO_IMAGERY,
+                "NO_IMAGERY",
+                "No Street View imagery available",
+                False,
+                True,
+            ),
+            (DetectionOutcome.IMAGE_UNAVAILABLE, "NO", "Image unavailable", False, False),
+            (DetectionOutcome.CANCELLED, "NO", "Detection cancelled", False, False),
+            (DetectionOutcome.FAILED, "NO", "Detection failed", False, False),
+        )
+
+        for outcome, token, observation, success, no_imagery in cases:
+            with self.subTest(outcome=outcome):
+                result = DetectionResult(
+                    success=success,
+                    outcome=outcome,
+                    latitude=41.2,
+                    longitude=-8.6,
+                    door_number="12A" if success else None,
+                    confidence=90 if success else 35,
+                    observation="text must not control the mapping",
+                    image_calls=3,
+                    metadata_calls=1,
+                )
+                detector = FakeDetector([result])
+                metrics = FakeMetrics()
+                dataframe = pd.DataFrame(
+                    [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
+                )
+
+                with tempfile.TemporaryDirectory() as directory:
+                    with self.assertLogs("door_number_detector.core.batch", level="INFO") as logs:
+                        output = run_detection_batch(
+                            dataframe,
+                            Path(directory) / "outcomes.csv",
+                            set(),
+                            detector_instance=detector,
+                            metrics=metrics,
+                        )
+                    with output.open(newline="", encoding="utf-8-sig") as output_file:
+                        rows = list(csv.DictReader(output_file, delimiter=";"))
+
+                self.assertEqual(len(rows), 0 if outcome is DetectionOutcome.CANCELLED else 1)
+                self.assertEqual(len(metrics.records), 1)
+                self.assertEqual(metrics.records[0]["image_calls"], 3)
+                self.assertEqual(metrics.records[0]["metadata_calls"], 1)
+                self.assertEqual(metrics.records[0]["success"], success)
+                self.assertEqual(metrics.records[0]["no_imagery"], no_imagery)
+                if outcome is DetectionOutcome.FAILED:
+                    self.assertTrue(any("1 error(s)" in message for message in logs.output))
+                if rows:
+                    self.assertEqual(rows[0]["PREDICTION_FOUND"], token)
+                    self.assertEqual(rows[0]["OBSERVATION"], observation)
 
 
 if __name__ == "__main__":

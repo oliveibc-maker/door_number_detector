@@ -15,6 +15,8 @@ import pandas as pd
 
 from door_number_detector.core.config import Config
 from door_number_detector.core.metrics import RunMetrics
+from door_number_detector.core.models import DetectionOutcome
+from door_number_detector.core.outcomes import OUTCOME_DETAILS
 from door_number_detector.core.sources import SourceFilter, query_sqlserver, read_excel_any
 
 if TYPE_CHECKING:
@@ -33,9 +35,6 @@ OUTPUT_COLUMNS = [
     "MATCH",
     "OBSERVATION",
 ]
-
-_NO_IMAGERY_TOKEN = "NO_IMAGERY"
-_NO_IMAGERY_OBSERVATION = "No Street View imagery available"
 
 
 def _normalize(value: str) -> str:
@@ -166,6 +165,7 @@ def run_detection_batch(
     errors = 0
     no_imagery_count = 0
     row_index = 0
+    cancelled_detection = False
 
     try:
         for row_index, (_, row) in enumerate(rows_to_process.iterrows(), 1):
@@ -184,31 +184,14 @@ def run_detection_batch(
             if pd.isna(latitude) or pd.isna(longitude):
                 logger.warning("[%s/%s] Skipping row with null coordinates.", row_index, total)
             else:
-                detector.street_view.reset_call_counts()
                 started_at = time.perf_counter()
-                result_success = False
-                is_no_imagery = False
-
                 try:
                     result = detector.detect_door_number(
                         float(latitude), float(longitude), cancel_event=cancel_event
                     )
-                    if cancel_event is not None and cancel_event.is_set():
-                        logger.info("[%s/%s] Cancelled mid-detection — stopping.", row_index, total)
-                        break
-
-                    observation = result.observation
-                    is_no_imagery = observation == _NO_IMAGERY_OBSERVATION
-                    if is_no_imagery:
-                        prediction_found = _NO_IMAGERY_TOKEN
-                        no_imagery_count += 1
-                    else:
-                        prediction_found = "YES" if result.success else "NO"
-                        prediction = result.door_number if prediction_found == "YES" else None
-                        confidence = result.confidence
-                        result_success = result.success
                 except Exception as exc:
                     errors += 1
+                    failed_details = OUTCOME_DETAILS[DetectionOutcome.FAILED]
                     logger.error(
                         "[%s/%s] detect_door_number failed at (%s, %s): %s",
                         row_index,
@@ -220,26 +203,53 @@ def run_detection_batch(
                     )
                     _append_row_to_csv(
                         output_path,
-                        [latitude, longitude, expected, None, 0, "NO", "NO", ""],
+                        [
+                            latitude,
+                            longitude,
+                            expected,
+                            None,
+                            0,
+                            failed_details.csv_prediction_found,
+                            "NO",
+                            failed_details.observation,
+                        ],
                     )
-                    image_calls, metadata_calls = detector.street_view.get_call_counts()
                     metrics.record(
                         elapsed_s=time.perf_counter() - started_at,
-                        image_calls=image_calls,
-                        metadata_calls=metadata_calls,
+                        image_calls=0,
+                        metadata_calls=0,
                         success=False,
                         no_imagery=False,
                     )
                     continue
 
-                image_calls, metadata_calls = detector.street_view.get_call_counts()
+                outcome = result.outcome
+                assert outcome is not None
+                details = OUTCOME_DETAILS[outcome]
                 metrics.record(
                     elapsed_s=time.perf_counter() - started_at,
-                    image_calls=image_calls,
-                    metadata_calls=metadata_calls,
-                    success=result_success,
-                    no_imagery=is_no_imagery,
+                    image_calls=result.image_calls,
+                    metadata_calls=result.metadata_calls,
+                    success=details.metrics_success,
+                    no_imagery=details.metrics_no_imagery,
                 )
+                if outcome is DetectionOutcome.CANCELLED or (
+                    cancel_event is not None and cancel_event.is_set()
+                ):
+                    cancelled_detection = True
+                    logger.info("[%s/%s] Cancelled mid-detection — stopping.", row_index, total)
+                    break
+
+                prediction_found = details.csv_prediction_found
+                observation = details.observation
+                if outcome is DetectionOutcome.FAILED:
+                    errors += 1
+                if details.metrics_no_imagery:
+                    no_imagery_count += 1
+                if details.metrics_success:
+                    prediction = result.door_number
+                if outcome in (DetectionOutcome.FOUND, DetectionOutcome.LOW_CONFIDENCE):
+                    confidence = result.confidence
 
             match = (
                 "YES"
@@ -270,7 +280,7 @@ def run_detection_batch(
                 "✓ MATCH"
                 if match == "YES"
                 else "📷 NO IMAGERY"
-                if prediction_found == _NO_IMAGERY_TOKEN
+                if prediction_found == "NO_IMAGERY"
                 else "✗ WRONG"
                 if prediction_found == "YES"
                 else "? NOT FOUND"
@@ -292,7 +302,7 @@ def run_detection_batch(
         if owns_detector:
             detector.close()
 
-    cancelled = cancel_event is not None and cancel_event.is_set()
+    cancelled = cancelled_detection or (cancel_event is not None and cancel_event.is_set())
     if cancelled:
         logger.info(
             "Cancelled after %s row(s). Partial results saved to %s", row_index, output_path

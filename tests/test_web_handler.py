@@ -184,6 +184,7 @@ class WebHandlerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         payload = json.loads(body)
         self.assertEqual(payload["door_number"], "12A")
+        self.assertEqual(payload["outcome"], "found")
         self.assertIn("observation", payload)
         self.assertIn("timestamp", payload)
         self.assertIsNone(payload["error"])
