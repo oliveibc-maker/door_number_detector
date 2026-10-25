@@ -167,6 +167,16 @@ Each run writes two files under `APP_DATA_DIR/outputs`:
 | `MATCH` | `YES` if the prediction matches the expected value, otherwise `NO` |
 | `OBSERVATION` | Empty when found; otherwise explains low confidence, missing imagery, unavailable images, or detection failure |
 
+A detection cancelled mid-run writes no CSV row and no database row, so resume picks that coordinate up again. Its Street View calls still count in the metrics.
+
+### SQLite results
+
+Every finished detection is saved to the `door_detection_results` table. `status` is `success` when a door number was found and `error` otherwise. For non-found rows, `error_message` holds the same fixed reason as the CSV `OBSERVATION`; internal error details stay in the log only.
+
+### Single-coordinate analysis (`POST /api/analyze`)
+
+Form fields: `latitude`, `longitude`, and optional `heading` (0–359) and `pitch`. Leave `heading` blank to aim the camera at the target coordinate; a supplied heading is used as given. The JSON response keeps its existing fields and adds `outcome` (`found`, `low_confidence`, `no_imagery`, `image_unavailable`, `cancelled` or `failed`) plus `image_calls` and `metadata_calls`, the Street View requests made for that detection.
+
 ### Offline CSV viewer
 
 To inspect an existing CSV without starting the server, open `src/door_number_detector/web/templates/results_viewer.html` directly in a browser and select or drop the CSV file. This standalone viewer reads the selected file locally; it does not submit data to the application.

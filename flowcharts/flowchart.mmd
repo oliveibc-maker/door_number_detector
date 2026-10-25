@@ -5,23 +5,29 @@ flowchart TD
     C --> E["Batch runner"]
     D --> E
     E --> F["Process next source row"]
-    F --> G["Street View metadata lookup"]
+    F --> G["Resolve Street View camera once per detection"]
     G --> H{"Panorama found?"}
-    H -->|No: ZERO_RESULTS| I["Record no-imagery result"]
-    H -->|Yes| J["Sweep heading offsets, pitch, and FOV"]
-    J --> K["Fetch Street View image"]
+    H -->|No: ZERO_RESULTS| I["Outcome: no imagery"]
+    H -->|"Yes, or lookup failed (use the coordinate)"| J["Sweep heading offsets, pitch, and FOV"]
+    J --> K["Fetch image from the resolved camera"]
     K --> L{"Usable image?"}
     L -->|No| M{"More sweep attempts?"}
     M -->|Yes| J
-    M -->|No| N["Record no prediction"]
+    M -->|No| Z{"Any usable image?"}
+    Z -->|No| N["Outcome: image unavailable"]
+    Z -->|Yes| R
     L -->|Yes| O["PaddleOCR on full image, 2x upscaled"]
-    O --> P["Parse and score OCR candidates"]
-    P --> Q{"Confident result?"}
-    Q -->|No or early-stop suppressed| M
-    Q -->|Yes| R["Select prediction"]
-    I --> S["Return result; persist in SQLite when applicable"]
+    O --> P["Parse every number read in the image"]
+    P --> Q{"Best candidate clean and at or above threshold?"}
+    Q -->|"No, or a year/watermark fragment"| M
+    Q -->|Yes: stop early| R["Candidate selection: rank by confidence, votes, length; swap suspicious numbers"]
+    R --> R2{"Winner at or above threshold?"}
+    R2 -->|Yes| R3["Outcome: found"]
+    R2 -->|No| R4["Outcome: low confidence"]
+    I --> S["Return outcome; save to SQLite unless cancelled"]
     N --> S
-    R --> S
+    R3 --> S
+    R4 --> S
     S --> T["Compare expected and detected values"]
     T --> U["Append CSV row"]
     U --> V{"More source rows?"}

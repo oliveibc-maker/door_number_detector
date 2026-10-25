@@ -5,23 +5,29 @@ flowchart TD
     C --> E["Processamento em lote"]
     D --> E
     E --> F["Processar próximo registo"]
-    F --> G["Consultar metadados do Street View"]
+    F --> G["Resolver a câmara do Street View uma vez por deteção"]
     G --> H{"Panorama encontrado?"}
-    H -->|Não: ZERO_RESULTS| I["Registar ausência de imagens"]
-    H -->|Sim| J["Percorrer direções, inclinações e FOV"]
-    J --> K["Obter imagem do Street View"]
+    H -->|Não: ZERO_RESULTS| I["Resultado: sem imagens"]
+    H -->|"Sim, ou consulta falhou (usar a coordenada)"| J["Percorrer direções, inclinações e FOV"]
+    J --> K["Obter imagem a partir da câmara resolvida"]
     K --> L{"Imagem utilizável?"}
     L -->|Não| M{"Há mais tentativas?"}
     M -->|Sim| J
-    M -->|Não| N["Registar previsão não encontrada"]
+    M -->|Não| Z{"Alguma imagem utilizável?"}
+    Z -->|Não| N["Resultado: imagem indisponível"]
+    Z -->|Sim| R
     L -->|Sim| O["PaddleOCR na imagem completa ampliada 2x"]
-    O --> P["Analisar e pontuar candidatos OCR"]
-    P --> Q{"Confiança suficiente?"}
-    Q -->|Não ou sem paragem antecipada| M
-    Q -->|Sim| R["Selecionar previsão"]
-    I --> S["Devolver resultado; guardar na SQLite quando aplicável"]
+    O --> P["Extrair todos os números lidos na imagem"]
+    P --> Q{"Melhor candidato limpo e acima do limiar?"}
+    Q -->|"Não, ou fragmento de ano/marca de água"| M
+    Q -->|Sim: paragem antecipada| R["Seleção de candidatos: ordenar por confiança, votos, comprimento; substituir números suspeitos"]
+    R --> R2{"Vencedor acima do limiar?"}
+    R2 -->|Sim| R3["Resultado: encontrado"]
+    R2 -->|Não| R4["Resultado: confiança baixa"]
+    I --> S["Devolver resultado; guardar na SQLite exceto se cancelado"]
     N --> S
-    R --> S
+    R3 --> S
+    R4 --> S
     S --> T["Comparar valor esperado e detetado"]
     T --> U["Acrescentar linha ao CSV"]
     U --> V{"Há mais registos?"}
