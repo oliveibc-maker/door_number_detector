@@ -98,7 +98,7 @@ class StreetViewFetcher:
         except requests.exceptions.RequestException as exc:
             # requests messages embed the request URL, which carries the API key.
             raise ValueError(
-                f"Street View metadata request failed: {_redact_api_key(str(exc))}"
+                f"Street View metadata request failed: {redact_api_key(str(exc))}"
             ) from None
         data = response.json()
 

@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
+from door_number_detector.core.candidate_selection import Candidate
 from door_number_detector.core.ocr import DoorNumberOCR
 
 
@@ -17,7 +18,7 @@ class FakeOcrReader:
 
 
 class OcrServiceTests(unittest.TestCase):
-    def test_upscales_image_and_ranks_candidates_by_confidence(self):
+    def test_upscales_image_and_returns_every_parsed_candidate(self):
         box = [[0, 0], [1, 0], [1, 1], [0, 1]]
         reader = FakeOcrReader(
             [
@@ -33,7 +34,10 @@ class OcrServiceTests(unittest.TestCase):
 
         result = service.extract_door_number(image)
 
-        self.assertEqual(result, ("8", 96))
+        self.assertEqual(
+            result,
+            [Candidate("12A", 88), Candidate("8", 96), Candidate("8", 91)],
+        )
         self.assertEqual(reader.image_shapes, [(6, 8, 3)])
 
     def test_returns_no_candidate_for_empty_ocr_page(self):
@@ -41,7 +45,7 @@ class OcrServiceTests(unittest.TestCase):
         service = DoorNumberOCR(reader=reader)
         image = Image.fromarray(np.zeros((2, 2, 3), dtype=np.uint8), mode="RGB")
 
-        self.assertEqual(service.extract_door_number(image), (None, 0))
+        self.assertEqual(service.extract_door_number(image), [])
 
 
 if __name__ == "__main__":

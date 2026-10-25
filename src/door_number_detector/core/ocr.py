@@ -2,12 +2,12 @@
 
 import logging
 import os
-from collections import Counter
 
 import cv2
 import numpy as np
 from PIL import Image
 
+from door_number_detector.core.candidate_selection import Candidate
 from door_number_detector.core.parsing import parse_ocr_text
 
 
@@ -43,10 +43,10 @@ class DoorNumberOCR:
             interpolation=cv2.INTER_CUBIC,
         )
 
-    def extract_door_number(self, image: Image.Image) -> tuple[str | None, int]:
+    def extract_door_number(self, image: Image.Image) -> list[Candidate]:
         cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         scan_image = self._upscale(cv_image, scale=2)
-        candidates: list[tuple[str, float]] = []
+        candidates: list[Candidate] = []
 
         self.logger.info("OCR [PaddleOCR]: full image 2x upscale...")
         ocr_result = self.reader.ocr(scan_image)
@@ -63,7 +63,7 @@ class DoorNumberOCR:
             for line in page or []:
                 bbox, (text, confidence) = line
                 for number in parse_ocr_text(text, self.logger.info):
-                    candidates.append((number, confidence))
+                    candidates.append(Candidate(number, int(confidence * 100)))
                     self.logger.info(
                         "PaddleOCR [full_2x] '%s' <- '%s' (%.0f%%)",
                         number,
@@ -73,31 +73,5 @@ class DoorNumberOCR:
 
         if not candidates:
             self.logger.info("No candidates found")
-            return None, 0
-
-        best_confidence: dict[str, float] = {}
-        confidence_sum: dict[str, float] = {}
-        for number, confidence in candidates:
-            if number not in best_confidence or confidence > best_confidence[number]:
-                best_confidence[number] = confidence
-            confidence_sum[number] = confidence_sum.get(number, 0.0) + confidence
-
-        vote_counts = Counter(number for number, _ in candidates)
-        best_number = max(
-            best_confidence,
-            key=lambda number: (
-                best_confidence[number],
-                vote_counts[number],
-                confidence_sum[number],
-            ),
-        )
-        confidence_pct = int(best_confidence[best_number] * 100)
-        self.logger.info(
-            "Best: '%s' (%s%%) conf_sum=%.2f votes=%s/%s",
-            best_number,
-            confidence_pct,
-            confidence_sum[best_number],
-            vote_counts[best_number],
-            len(candidates),
-        )
-        return best_number, confidence_pct
+            return []
+        return candidates

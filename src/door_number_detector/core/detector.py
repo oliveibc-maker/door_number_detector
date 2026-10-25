@@ -1,21 +1,19 @@
 """Main door number detection workflow."""
 
 import logging
-import re
 import threading
-from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
 from door_number_detector.core.config import Config
 from door_number_detector.core.database import DatabaseManager
 from door_number_detector.core.google_street_view import NoImageryAvailable, StreetViewFetcher
 from door_number_detector.core.models import DetectionResult
 from door_number_detector.core.ocr import DoorNumberOCR
-from door_number_detector.core.parsing import BLOCKLIST
 from door_number_detector.core.redaction import redact_api_key
 from door_number_detector.core.sweep import StreetViewSweep
 
@@ -56,10 +54,11 @@ class DoorNumberDetector:
         )
 
         self.ocr = DoorNumberOCR(reader=ocr_engine, logger=logger)
+        self.candidate_selector = CandidateSelector(self.config.confidence_threshold, logger)
         self.sweep = StreetViewSweep(
             self.street_view,
             self.ocr,
-            self._has_confident_result,
+            self.candidate_selector,
             debug=self.config.debug,
             logger=logger,
         )
@@ -73,59 +72,6 @@ class DoorNumberDetector:
         else:
             image.save(path)
         return path
-
-    @staticmethod
-    def _is_year_like(num: str) -> bool:
-        return bool(
-            re.fullmatch(r"202", num)
-            or re.fullmatch(r"20\d{2}", num)
-            or re.fullmatch(r"19\d{2}", num)
-        )
-
-    @staticmethod
-    def _is_suspicious_short(num: str) -> bool:
-        """True if the candidate is a short fragment likely from a year watermark.
-
-        Covers:
-          - Two-digit year fragments: 20 (prefix), 21–26 (recent year suffixes)
-          - e.g. '20', '24', '25', '23', '22', '21', '26'
-        """
-        if re.fullmatch(r"2[0-6]", num):
-            return True
-        return False
-
-    def _is_bad_candidate(self, num: str) -> bool:
-        return self._is_year_like(num) or self._is_suspicious_short(num)
-
-    def _no_early_stop_number(self, num: str) -> bool:
-        if num in ("20", "2", "24", "25", "202"):
-            return True
-        if re.fullmatch(r"20\d{2}", num):
-            return True
-        if re.fullmatch(r"30\d{2}", num):
-            return True
-        return False
-
-    def _has_confident_result(self, candidates: list[dict]) -> bool:
-        if not candidates:
-            return False
-        best = max(
-            candidates,
-            key=lambda c: (c["confidence"], len(c["number"]) if c["number"] else 0),
-        )
-        if not (best["number"] and best["confidence"] >= self.config.confidence_threshold):
-            return False
-
-        best_number = best["number"]
-
-        if self._no_early_stop_number(best_number):
-            logger.info(
-                f"Early stop suppressed for '{best_number}' "
-                f"(matches no-early-stop pattern) — continuing sweep."
-            )
-            return False
-
-        return True
 
     def detect_door_number(
         self,
@@ -145,20 +91,18 @@ class DoorNumberDetector:
                 self.current_debug_house_dir = self.debug_dir / house_name
                 self.current_debug_house_dir.mkdir(parents=True, exist_ok=True)
 
-            all_image_candidates: list[dict] = []
+            all_image_candidates: list[Candidate] = []
 
             if image is not None:
                 logger.info("Using supplied image instead of fetching from Street View")
-                number, confidence = self.ocr.extract_door_number(image)
-                logger.info(f"Supplied image -> '{number}' (confidence: {confidence}%)")
-                all_image_candidates.append(
-                    {
-                        "number": number,
-                        "confidence": confidence,
-                        "heading": heading,
-                        "pitch": pitch,
-                    }
-                )
+                all_image_candidates = self.ocr.extract_door_number(image)
+                if all_image_candidates:
+                    all_image_candidates = [
+                        Candidate(candidate.number, candidate.confidence, heading, pitch)
+                        for candidate in all_image_candidates
+                    ]
+                else:
+                    all_image_candidates = [Candidate("", 0, heading, pitch)]
             else:
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
@@ -217,96 +161,19 @@ class DoorNumberDetector:
                     error="Image unavailable",
                 )
 
-            confident_votes = Counter(
-                c["number"]
-                for c in all_image_candidates
-                if c["number"] and c["confidence"] >= self.config.confidence_threshold
-            )
+            best_candidate = self.candidate_selector.select(all_image_candidates)
+            if best_candidate is None:
+                raise RuntimeError("Candidate selection returned no result for fetched images")
 
-            best_candidate = max(
-                all_image_candidates,
-                key=lambda c: (
-                    c["confidence"],
-                    confident_votes.get(c["number"], 0),
-                    len(c["number"]) if c["number"] else 0,
-                ),
-            )
-
-            door_number = best_candidate["number"]
-            confidence = best_candidate["confidence"]
-            heading = best_candidate["heading"]
-            pitch = best_candidate["pitch"]
+            door_number = best_candidate.number
+            confidence = best_candidate.confidence
+            heading = best_candidate.heading_offset
+            pitch = best_candidate.pitch
 
             logger.info(
                 f"Best across all passes: '{door_number}' ({confidence}%) "
                 f"at heading_offset={heading} pitch={pitch}"
             )
-
-            if door_number and self._is_bad_candidate(door_number):
-                sorted_candidates = sorted(
-                    all_image_candidates,
-                    key=lambda c: (c["confidence"], len(c["number"]) if c["number"] else 0),
-                    reverse=True,
-                )
-
-                clean_alternative = next(
-                    (
-                        c
-                        for c in sorted_candidates
-                        if c["number"]
-                        and c["number"] != door_number
-                        and not self._is_bad_candidate(c["number"])
-                        and c["number"] not in BLOCKLIST
-                        and c["confidence"] >= self.config.confidence_threshold
-                    ),
-                    None,
-                )
-
-                if clean_alternative:
-                    logger.info(
-                        f"Substituting '{door_number}' ({confidence}%) "
-                        f"with clean candidate '{clean_alternative['number']}' "
-                        f"({clean_alternative['confidence']}%)"
-                    )
-                    door_number = clean_alternative["number"]
-                    confidence = clean_alternative["confidence"]
-                    heading = clean_alternative["heading"]
-                    pitch = clean_alternative["pitch"]
-
-                elif self._is_year_like(door_number):
-                    tier2_alternative = next(
-                        (
-                            c
-                            for c in sorted_candidates
-                            if c["number"]
-                            and c["number"] != door_number
-                            and self._is_suspicious_short(c["number"])
-                            and c["number"] not in BLOCKLIST
-                            and c["confidence"] >= self.config.confidence_threshold
-                        ),
-                        None,
-                    )
-
-                    if tier2_alternative:
-                        logger.info(
-                            f"No clean alternative found — substituting Tier 1 "
-                            f"'{door_number}' ({confidence}%) with Tier 2 fallback "
-                            f"'{tier2_alternative['number']}' "
-                            f"({tier2_alternative['confidence']}%)"
-                        )
-                        door_number = tier2_alternative["number"]
-                        confidence = tier2_alternative["confidence"]
-                        heading = tier2_alternative["heading"]
-                        pitch = tier2_alternative["pitch"]
-                    else:
-                        logger.info(
-                            f"No clean or Tier 2 alternative found — keeping Tier 1 '{door_number}'"
-                        )
-                else:
-                    logger.info(
-                        f"Best is Tier 2 suspicious short '{door_number}' "
-                        f"with no clean alternative — keeping it"
-                    )
 
             success = bool(door_number and confidence >= self.config.confidence_threshold)
             error = None

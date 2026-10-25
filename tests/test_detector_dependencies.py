@@ -36,7 +36,9 @@ class FakeOCR:
     def ocr(self, image):
         self.images.append(image.shape)
         box = [[0, 0], [1, 0], [1, 1], [0, 1]]
-        return [[[box, ("17", 0.95)]]]
+        if len(self.images) == 1:
+            return [[[box, ("2024", 0.99)], [box, ("17", 0.90)]]]
+        return [[[box, ("17", 1.0)]]]
 
 
 class DetectorDependencyTests(unittest.TestCase):
@@ -76,8 +78,8 @@ class DetectorDependencyTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.door_number, "17")
-        self.assertEqual(ocr.images, [(4, 4, 3)])
-        self.assertEqual(len(street_view.requests), 1)
+        self.assertEqual(ocr.images, [(4, 4, 3), (4, 4, 3)])
+        self.assertEqual(len(street_view.requests), 2)
         self.assertEqual(database.saved[0]["door_number"], "17")
         self.assertTrue(database.closed)
 
