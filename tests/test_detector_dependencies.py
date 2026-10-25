@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from door_number_detector.core.google_street_view import NoImageryAvailable
+from door_number_detector.core.google_street_view import CameraPosition, NoImageryAvailable
 from door_number_detector.core.models import DetectionOutcome
 
 
@@ -30,14 +30,22 @@ _DEFAULT_IMAGE = object()
 class FakeStreetView:
     def __init__(self, image_result=_DEFAULT_IMAGE, cancel_event=None):
         self.requests = []
+        self.resolved = []
+        self.cameras = []
         self.image_calls = 0
+        self.camera = CameraPosition(41.0, -8.001, None, False)
         self.image_result = (
             Image.new("RGB", (2, 2)) if image_result is _DEFAULT_IMAGE else image_result
         )
         self.cancel_event = cancel_event
 
-    def get_image(self, latitude, longitude, **kwargs):
-        self.requests.append((latitude, longitude, kwargs))
+    def resolve_camera(self, latitude, longitude):
+        self.resolved.append((latitude, longitude))
+        return self.camera
+
+    def get_image(self, camera, **kwargs):
+        self.requests.append((camera, kwargs))
+        self.cameras.append(camera)
         self.image_calls += 1
         if self.cancel_event is not None:
             self.cancel_event.set()
@@ -106,41 +114,12 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(result.door_number, "17")
         self.assertEqual(ocr.images, [(4, 4, 3), (4, 4, 3)])
         self.assertEqual(len(street_view.requests), 2)
+        self.assertEqual(street_view.resolved, [(41.0, -8.0)])
+        self.assertEqual(street_view.requests[0][1]["heading"], 90)
         self.assertEqual(result.image_calls, 2)
         self.assertEqual(result.metadata_calls, 0)
         self.assertEqual(database.saved[0]["door_number"], "17")
         self.assertTrue(database.closed)
-
-    def test_heading_lookup_error_does_not_log_api_key(self):
-        config = SimpleNamespace(
-            data_dir=Path(self.data_directory.name),
-            debug=False,
-            confidence_threshold=70,
-        )
-        detector = self.detector_type(
-            config=config,
-            database_manager=FakeDatabase(),
-            street_view_fetcher=FakeStreetView(),
-            ocr_engine=FakeOCR(),
-            debug_root=Path(self.data_directory.name) / "debug-redaction",
-        )
-
-        try:
-            with (
-                patch.object(detector.sweep, "fetch_candidates", return_value=[]),
-                patch.object(
-                    detector.street_view,
-                    "get_pano_location",
-                    side_effect=RuntimeError("request failed: https://example.test/?key=secret"),
-                    create=True,
-                ),
-                self.assertLogs("door_number_detector.core.detector", level="WARNING") as logs,
-            ):
-                detector.detect_door_number(41.0, -8.0)
-        finally:
-            detector.close()
-
-        self.assertNotIn("secret", "\n".join(logs.output))
 
     def test_unexpected_error_redacts_api_key_in_logs_and_result(self):
         config = SimpleNamespace(
@@ -174,6 +153,43 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(result.error, "Detection failed")
         self.assertNotIn("secret", logs.records[0].getMessage())
         self.assertIn("[REDACTED]", logs.records[0].getMessage())
+
+    def test_detector_resolves_camera_even_with_a_supplied_heading(self):
+        street_view = FakeStreetView()
+        detector = self._make_detector(FakeDatabase(), street_view, FakeOCR())
+
+        detector.detect_door_number(41.0, -8.0, heading=123)
+
+        self.assertEqual(street_view.resolved, [(41.0, -8.0)])
+        self.assertEqual(street_view.requests[0][1]["heading"], 123)
+
+    def test_missing_heading_uses_camera_to_target_heading(self):
+        street_view = FakeStreetView()
+        detector = self._make_detector(FakeDatabase(), street_view, FakeOCR())
+
+        detector.detect_door_number(41.0, -8.0)
+
+        self.assertAlmostEqual(street_view.requests[0][1]["heading"], 90, places=3)
+
+    def test_fallback_camera_is_passed_to_the_sweep(self):
+        street_view = FakeStreetView()
+        street_view.camera = CameraPosition(41.0, -8.0, None, True)
+        detector = self._make_detector(FakeDatabase(), street_view, FakeOCR())
+
+        detector.detect_door_number(41.0, -8.0, heading=123)
+
+        self.assertTrue(street_view.cameras)
+        self.assertTrue(all(camera.fallback for camera in street_view.cameras))
+
+    def test_supplied_image_does_not_touch_street_view_client(self):
+        street_view = FakeStreetView()
+        detector = self._make_detector(FakeDatabase(), street_view, FakeOCR())
+
+        detector.detect_door_number(41.0, -8.0, heading=123, image=Image.new("RGB", (2, 2)))
+
+        self.assertEqual(street_view.resolved, [])
+        self.assertEqual(street_view.requests, [])
+        self.assertEqual(street_view.get_call_counts(), (0, 0))
 
     def test_detector_returns_and_persists_each_finished_outcome(self):
         box = [[0, 0], [1, 0], [1, 1], [0, 1]]

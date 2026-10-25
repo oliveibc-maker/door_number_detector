@@ -491,7 +491,8 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             try:
                 lat = float(form_data.get("latitude", [""])[0])
                 lon = float(form_data.get("longitude", [""])[0])
-                hdg = int(form_data.get("heading", ["0"])[0] or 0)
+                heading_value = form_data.get("heading", [None])[0]
+                hdg = int(heading_value) if heading_value else None
                 pit = int(form_data.get("pitch", ["0"])[0] or 0)
             except ValueError:
                 self._send_json(400, {"error": "Coordinates and camera angles must be numeric."})
@@ -501,7 +502,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 or not math.isfinite(lon)
                 or not -90 <= lat <= 90
                 or not -180 <= lon <= 180
-                or not 0 <= hdg <= 359
+                or (hdg is not None and not 0 <= hdg <= 359)
                 or not -90 <= pit <= 90
             ):
                 self._send_json(

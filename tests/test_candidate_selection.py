@@ -49,6 +49,16 @@ class CandidateSelectorTests(unittest.TestCase):
                     candidate("17", 90),
                 )
 
+    def test_vote_ranking_applies_to_clean_replacements(self):
+        candidates = [
+            candidate("2024", 99, 0),
+            candidate("8", 90, 1),
+            candidate("8", 90, 2),
+            candidate("12", 90, 3),
+        ]
+
+        self.assertEqual(self.selector.select(candidates), candidates[1])
+
     def test_repeated_confident_reads_break_confidence_ties(self):
         winner = self.selector.select(
             [

@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
-from door_number_detector.core.google_street_view import NoImageryAvailable
+from door_number_detector.core.google_street_view import CameraPosition, NoImageryAvailable
 
 DEFAULT_FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
     (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
@@ -34,6 +34,7 @@ class StreetViewSweep:
         self,
         latitude: float,
         longitude: float,
+        camera: CameraPosition,
         heading,
         pass_label: str = "center",
         pitch_override: int | None = None,
@@ -82,10 +83,8 @@ class StreetViewSweep:
                     )
                     try:
                         image = self.street_view.get_image(
-                            latitude,
-                            longitude,
-                            heading=heading,
-                            heading_offset=offset,
+                            camera,
+                            heading=(heading + offset) % 360,
                             pitch=pitch,
                             fov=fov,
                         )

@@ -32,10 +32,7 @@ class CandidateSelector:
     def _image_key(candidate: Candidate) -> tuple[int | float | None, int | None, int | None]:
         return candidate.heading_offset, candidate.pitch, candidate.fov
 
-    def best(self, candidates: list[Candidate]) -> Candidate | None:
-        if not candidates:
-            return None
-
+    def _ranked_candidates(self, candidates: list[Candidate]) -> list[Candidate]:
         image_votes: dict[str, set[tuple[int | float | None, int | None, int | None]]] = (
             defaultdict(set)
         )
@@ -43,14 +40,19 @@ class CandidateSelector:
             if candidate.number and candidate.confidence >= self.confidence_threshold:
                 image_votes[candidate.number].add(self._image_key(candidate))
 
-        return max(
+        return sorted(
             candidates,
             key=lambda candidate: (
                 candidate.confidence,
                 len(image_votes[candidate.number]),
                 len(candidate.number),
             ),
+            reverse=True,
         )
+
+    def best(self, candidates: list[Candidate]) -> Candidate | None:
+        ranked = self._ranked_candidates(candidates)
+        return ranked[0] if ranked else None
 
     def should_stop(self, candidates: list[Candidate]) -> bool:
         winner = self.best(candidates)
@@ -65,15 +67,11 @@ class CandidateSelector:
         return bool(winner.number)
 
     def select(self, candidates: list[Candidate]) -> Candidate | None:
-        winner = self.best(candidates)
+        ranked = self._ranked_candidates(candidates)
+        winner = ranked[0] if ranked else None
         if winner is None or not self._suspicion_tier(winner.number):
             return winner
 
-        ranked = sorted(
-            candidates,
-            key=lambda candidate: (candidate.confidence, len(candidate.number)),
-            reverse=True,
-        )
         clean = next(
             (
                 candidate

@@ -147,28 +147,16 @@ class DoorNumberDetector:
                         )
                     )
 
+                camera = self.street_view.resolve_camera(latitude, longitude)
                 _base_heading = heading
-                road_heading: float | None = None
-
+                road_heading = camera.road_heading
                 if _base_heading is None:
-                    try:
-                        cam_lat, cam_lng, road_heading = self.street_view.get_pano_location(
-                            latitude, longitude
-                        )
-                        _base_heading = StreetViewFetcher.calculate_heading(
-                            cam_lat, cam_lng, latitude, longitude
-                        )
-                        logger.info(
-                            f"Heading pano->target: {_base_heading:.1f}° "
-                            f"(road_heading from API: {road_heading})"
-                        )
-                    except NoImageryAvailable:
-                        raise
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not compute heading (%s). Using 0°.", type(exc).__name__
-                        )
-                        _base_heading = 0
+                    _base_heading = StreetViewFetcher.heading_to_target(camera, latitude, longitude)
+                    logger.info(
+                        "Heading camera->target: %.1f° (road heading from API: %s)",
+                        _base_heading,
+                        road_heading,
+                    )
 
                 if road_heading is None:
                     logger.warning("road_heading unavailable — using camera-to-target heading.")
@@ -178,6 +166,7 @@ class DoorNumberDetector:
                 all_image_candidates = self.sweep.fetch_candidates(
                     latitude,
                     longitude,
+                    camera,
                     _base_heading,
                     pass_label="direct",
                     pitch_override=pitch,

@@ -170,7 +170,13 @@ class WebHandlerTests(unittest.TestCase):
             heading=10,
             pitch=0,
         )
-        self.app._detector.detect_door_number = lambda *args, **kwargs: typed_result
+        calls = []
+
+        def analyze(*args, **kwargs):
+            calls.append((args, kwargs))
+            return typed_result
+
+        self.app._detector.detect_door_number = analyze
         status, body = self._request(
             "POST",
             "/api/analyze",
@@ -188,6 +194,7 @@ class WebHandlerTests(unittest.TestCase):
         self.assertIn("observation", payload)
         self.assertIn("timestamp", payload)
         self.assertIsNone(payload["error"])
+        self.assertIsNone(calls[0][0][2])
 
     def test_detector_factory_is_lazy_and_constructs_once(self):
         self.assertIsNone(self.original_detector)

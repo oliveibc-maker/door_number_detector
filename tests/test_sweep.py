@@ -2,7 +2,7 @@ import threading
 import unittest
 
 from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
-from door_number_detector.core.google_street_view import NoImageryAvailable
+from door_number_detector.core.google_street_view import CameraPosition, NoImageryAvailable
 from door_number_detector.core.sweep import StreetViewSweep
 
 
@@ -11,8 +11,8 @@ class FakeStreetView:
         self.images = iter(images)
         self.calls = []
 
-    def get_image(self, latitude, longitude, **kwargs):
-        self.calls.append((latitude, longitude, kwargs))
+    def get_image(self, camera, **kwargs):
+        self.calls.append((camera, kwargs))
         image = next(self.images)
         if isinstance(image, Exception):
             raise image
@@ -36,17 +36,18 @@ class SweepTests(unittest.TestCase):
         candidates = sweep.fetch_candidates(
             41.0,
             -8.0,
+            CameraPosition(41.0, -8.0, None, True),
             90,
             sweep=[(10, [0, 5], [0, -5])],
         )
 
         self.assertEqual([candidate.number for candidate in candidates], ["9", "10"])
         self.assertEqual(
-            [call[2]["heading_offset"] for call in street_view.calls],
-            [0, 5],
+            [call[1]["heading"] for call in street_view.calls],
+            [90, 95],
         )
         self.assertEqual(
-            [call[2]["pitch"] for call in street_view.calls],
+            [call[1]["pitch"] for call in street_view.calls],
             [0, 0],
         )
 
@@ -55,7 +56,13 @@ class SweepTests(unittest.TestCase):
         sweep = StreetViewSweep(street_view, FakeOcr([]), CandidateSelector(70))
 
         self.assertEqual(
-            sweep.fetch_candidates(41.0, -8.0, 90, sweep=[(10, [0, 5], [0])]),
+            sweep.fetch_candidates(
+                41.0,
+                -8.0,
+                CameraPosition(41.0, -8.0, None, True),
+                90,
+                sweep=[(10, [0, 5], [0])],
+            ),
             [],
         )
         self.assertEqual(len(street_view.calls), 2)
@@ -70,6 +77,7 @@ class SweepTests(unittest.TestCase):
             sweep.fetch_candidates(
                 41.0,
                 -8.0,
+                CameraPosition(41.0, -8.0, None, True),
                 90,
                 sweep=[(10, [0], [0])],
                 cancel_event=cancel_event,
@@ -83,7 +91,13 @@ class SweepTests(unittest.TestCase):
         sweep = StreetViewSweep(street_view, FakeOcr([]), CandidateSelector(70))
 
         with self.assertRaises(NoImageryAvailable):
-            sweep.fetch_candidates(41.0, -8.0, 90, sweep=[(10, [0, 5], [0])])
+            sweep.fetch_candidates(
+                41.0,
+                -8.0,
+                CameraPosition(41.0, -8.0, None, True),
+                90,
+                sweep=[(10, [0, 5], [0])],
+            )
         self.assertEqual(len(street_view.calls), 1)
 
     def test_sweep_continues_past_suspicious_candidate_then_stops_on_clean_one(self):
@@ -91,7 +105,13 @@ class SweepTests(unittest.TestCase):
         ocr = FakeOcr([[Candidate("23", 99)], [Candidate("17", 90)]])
         sweep = StreetViewSweep(street_view, ocr, CandidateSelector(70))
 
-        candidates = sweep.fetch_candidates(41.0, -8.0, 90, sweep=[(10, [0, 5], [0])])
+        candidates = sweep.fetch_candidates(
+            41.0,
+            -8.0,
+            CameraPosition(41.0, -8.0, None, True),
+            90,
+            sweep=[(10, [0, 5], [0])],
+        )
 
         self.assertEqual([candidate.number for candidate in candidates], ["23", "17"])
         self.assertEqual(len(street_view.calls), 2)

@@ -2,15 +2,23 @@
 
 import logging
 import math
+from collections import OrderedDict
+from dataclasses import dataclass
 from io import BytesIO
 
 import numpy as np
 import requests
 from PIL import Image
 
-from door_number_detector.core.redaction import redact_api_key
-
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CameraPosition:
+    latitude: float
+    longitude: float
+    road_heading: float | None
+    fallback: bool
 
 
 class NoImageryAvailable(Exception):
@@ -33,13 +41,14 @@ class StreetViewFetcher:
     # Pixel std-dev threshold below which an image is the grey placeholder.
     # Real Street View photos always have std >> 30; the placeholder is ~0–3.
     _NO_IMAGERY_STD_THRESHOLD = 12.0
+    _CAMERA_CACHE_SIZE = 512
 
-    def __init__(self, api_key, size="640x640", https_proxy=""):
+    def __init__(self, api_key, size="640x640", https_proxy="", *, session=None):
         self.api_key = api_key
         self.size = size
-        self._pano_cache: dict[tuple[float, float], tuple[float, float, float | None]] = {}
-        self._session = requests.Session()
-        if https_proxy:
+        self._camera_cache: OrderedDict[tuple[float, float], CameraPosition] = OrderedDict()
+        self._session = session if session is not None else requests.Session()
+        if session is None and https_proxy:
             self._session.proxies.update(
                 {
                     "http": https_proxy,
@@ -74,17 +83,12 @@ class StreetViewFetcher:
 
     # ── Metadata / pano location ───────────────────────────────────────────────
 
-    def get_pano_location(self, latitude, longitude):
-        """Return (cam_lat, cam_lng, road_heading) for the nearest Street View pano.
-
-        Raises NoImageryAvailable ONLY when the API confirms no panorama exists
-        within the search radius (ZERO_RESULTS status).
-        Results are cached so the same coordinate never triggers more than one
-        metadata API call across the entire FOV sweep.
-        """
+    def resolve_camera(self, latitude: float, longitude: float) -> CameraPosition:
+        """Resolve a camera once, falling back to the requested coordinate on errors."""
         cache_key = (latitude, longitude)
-        if cache_key in self._pano_cache:
-            return self._pano_cache[cache_key]
+        if cache_key in self._camera_cache:
+            self._camera_cache.move_to_end(cache_key)
+            return self._camera_cache[cache_key]
 
         params = {
             "location": f"{latitude},{longitude}",
@@ -95,30 +99,62 @@ class StreetViewFetcher:
         try:
             response = self._session.get(self.METADATA_URL, params=params, timeout=10)
             response.raise_for_status()
-        except requests.exceptions.RequestException as exc:
-            # requests messages embed the request URL, which carries the API key.
-            raise ValueError(
-                f"Street View metadata request failed: {redact_api_key(str(exc))}"
-            ) from None
-        data = response.json()
+            data = response.json()
+        except Exception as exc:
+            logger.warning(
+                "Camera lookup failed (%s); using the requested coordinate.", type(exc).__name__
+            )
+            return CameraPosition(latitude, longitude, None, True)
 
+        if not isinstance(data, dict):
+            logger.warning(
+                "Camera lookup returned an invalid response; using the requested coordinate."
+            )
+            return CameraPosition(latitude, longitude, None, True)
         status = data.get("status")
         if status == "ZERO_RESULTS":
-            # Genuinely no panorama within ~50 m — do not cache, raise immediately.
             raise NoImageryAvailable(
                 f"No Street View panorama within search radius of ({latitude}, {longitude})"
             )
         if status != "OK":
-            raise ValueError(f"Street View metadata unavailable: {status}")
+            logger.warning(
+                "Camera lookup returned an unavailable status; using the requested coordinate."
+            )
+            return CameraPosition(latitude, longitude, None, True)
 
         location = data.get("location", {})
-        result = (
-            location.get("lat"),
-            location.get("lng"),
-            data.get("heading"),
-        )
-        self._pano_cache[cache_key] = result
-        return result
+        try:
+            camera_latitude = float(location["lat"])
+            camera_longitude = float(location["lng"])
+        except (KeyError, TypeError, ValueError):
+            logger.warning(
+                "Camera lookup returned an invalid location; using the requested coordinate."
+            )
+            return CameraPosition(latitude, longitude, None, True)
+        if (
+            not math.isfinite(camera_latitude)
+            or not math.isfinite(camera_longitude)
+            or not -90 <= camera_latitude <= 90
+            or not -180 <= camera_longitude <= 180
+        ):
+            logger.warning(
+                "Camera lookup returned an invalid location; using the requested coordinate."
+            )
+            return CameraPosition(latitude, longitude, None, True)
+        road_heading = data.get("heading")
+        try:
+            road_heading = float(road_heading) if road_heading is not None else None
+        except (TypeError, ValueError):
+            road_heading = None
+        if road_heading is not None and not math.isfinite(road_heading):
+            road_heading = None
+
+        camera = CameraPosition(camera_latitude, camera_longitude, road_heading, False)
+        self._camera_cache[cache_key] = camera
+        self._camera_cache.move_to_end(cache_key)
+        if len(self._camera_cache) > self._CAMERA_CACHE_SIZE:
+            self._camera_cache.popitem(last=False)
+        return camera
 
     @staticmethod
     def calculate_heading(cam_lat, cam_lng, target_lat, target_lng):
@@ -133,99 +169,46 @@ class StreetViewFetcher:
         heading = math.degrees(math.atan2(x, y))
         return (heading + 360) % 360
 
+    @classmethod
+    def heading_to_target(
+        cls, camera: CameraPosition, target_latitude: float, target_longitude: float
+    ) -> float:
+        return cls.calculate_heading(
+            camera.latitude, camera.longitude, target_latitude, target_longitude
+        )
+
     # ── Image fetching ─────────────────────────────────────────────────────────
 
-    def get_image(self, latitude, longitude, heading=None, heading_offset=0, pitch=0, fov=90):
-        """Fetch a Street View image for the given coordinates.
-
-        Returns None when:
-          - the image is the grey placeholder for this specific angle (the sweep
-            will simply continue to the next heading/pitch/FOV combination), OR
-          - a transient network / HTTP error occurs.
-
-        Raises NoImageryAvailable ONLY when get_pano_location() confirms there is
-        no panorama at all for this coordinate (ZERO_RESULTS from metadata API).
-        This only happens when heading is pre-specified and the cache is cold.
-        """
+    def get_image(
+        self,
+        camera: CameraPosition,
+        heading: float,
+        pitch: int = 0,
+        fov: int = 90,
+    ) -> Image.Image | None:
+        """Fetch one image from a resolved camera at an absolute heading."""
+        params = {
+            "location": f"{camera.latitude},{camera.longitude}",
+            "size": self.size,
+            "heading": heading % 360,
+            "pitch": pitch,
+            "fov": fov,
+            "source": "outdoor",
+            "key": self.api_key,
+        }
+        self._image_call_count += 1
         try:
-            # ── Resolve pano location (cached after first call) ────────────────
-            try:
-                cam_lat, cam_lng, _ = self.get_pano_location(latitude, longitude)
-                # NoImageryAvailable propagates — do not catch it here.
-                if heading is None:
-                    heading = self.calculate_heading(cam_lat, cam_lng, latitude, longitude)
-                heading = (heading + heading_offset) % 360
-                logger.info(
-                    f"Using Street View camera location {cam_lat},{cam_lng} heading {heading:.1f}"
-                )
-                location = f"{cam_lat},{cam_lng}"
-            except NoImageryAvailable:
-                raise
-            except Exception as metadata_exc:
-                logger.warning(
-                    "Could not resolve pano location (%s): %s",
-                    type(metadata_exc).__name__,
-                    redact_api_key(str(metadata_exc)),
-                )
-                location = f"{latitude},{longitude}"
-                if heading is None:
-                    heading = 0
-                heading = (heading + heading_offset) % 360
-                logger.info(
-                    f"Falling back to requested location {location} with heading {heading:.1f}"
-                )
-
-            # ── Fetch image ───────────────────────────────────────────────────
-            params = {
-                "location": location,
-                "size": self.size,
-                "heading": heading,
-                "pitch": pitch,
-                "fov": fov,
-                "source": "outdoor",
-                "key": self.api_key,
-            }
-
-            logger.info(f"Fetching image for: {location} (target {latitude},{longitude})")
-            self._image_call_count += 1
             response = self._session.get(self.BASE_URL, params=params, timeout=10)
             response.raise_for_status()
-
             if not response.headers.get("content-type", "").startswith("image"):
-                logger.warning(f"Response is not an image: {response.headers.get('content-type')}")
+                logger.warning("Street View image endpoint returned a non-image response.")
                 return None
 
             image = Image.open(BytesIO(response.content))
-
-            # ── Pixel-level grey placeholder check ────────────────────────────
-            # A grey image for a specific angle means the camera has no data at
-            # that heading/pitch/FOV — NOT that the road has no coverage.
-            # Return None so the sweep moves on to the next angle.
             if self._is_no_imagery(image):
-                logger.debug(
-                    f"Grey placeholder at ({latitude}, {longitude}) "
-                    f"heading={heading:.1f} pitch={pitch} fov={fov} — skipping angle."
-                )
+                logger.debug("Street View returned a grey placeholder; skipping this angle.")
                 return None
-
-            logger.info("Image retrieved successfully")
             return image
-
-        except NoImageryAvailable:
-            raise
-        except requests.exceptions.RequestException as exc:
-            logger.error("Error fetching image: %s", redact_api_key(str(exc)))
-            return None
         except Exception as exc:
-            logger.error("Unexpected error: %s", redact_api_key(str(exc)))
+            logger.warning("Street View image fetch failed (%s).", type(exc).__name__)
             return None
-
-    def is_imagery_available(self, latitude, longitude) -> bool:
-        """Check whether Street View imagery is available for a coordinate."""
-        try:
-            self.get_pano_location(latitude, longitude)
-            return True
-        except (NoImageryAvailable, ValueError):
-            return False
-        except Exception:
-            return False
