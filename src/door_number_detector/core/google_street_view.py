@@ -92,8 +92,14 @@ class StreetViewFetcher:
         }
 
         self._metadata_call_count += 1
-        response = self._session.get(self.METADATA_URL, params=params, timeout=10)
-        response.raise_for_status()
+        try:
+            response = self._session.get(self.METADATA_URL, params=params, timeout=10)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            # requests messages embed the request URL, which carries the API key.
+            raise ValueError(
+                f"Street View metadata request failed: {_redact_api_key(str(exc))}"
+            ) from None
         data = response.json()
 
         status = data.get("status")
