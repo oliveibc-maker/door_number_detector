@@ -34,6 +34,9 @@ From the operator's side nothing changes: the server still starts the same way, 
 - One module owns process-wide startup (load Paddle, configure logging, install the stop signal handler) and shutdown (set cancel, close the server, wait for the worker, close the detector). The web app start function calls it and does not repeat these steps.
 - The order stays as it is today: Paddle first, then logging, then the stop signal handler. The change is where this is written and tested, not what the order is.
 - The log level reset caused by the PaddleOCR import is handled in the same place as the other process-wide steps, so the OCR reader no longer saves and restores the root log level. If that cannot be done safely (for example, the import is lazy and happens later), keep the restore in the OCR reader and record the reason in the spec thread instead of forcing the move.
+- Outcome for the log level restore: it stays in the OCR reader. `paddleocr` is imported lazily when the detector is first built, long after startup, so a restore in the startup module would not cover it.
+- Orphaned upload removal stays in the web app start function, because it is web-specific.
+- Startup now removes orphaned uploads and logs the banner inside the `try`, so the server is closed if either fails. The upload handler also returns 500 "Could not prepare the output directory." when the output directory cannot be created, and removes the upload on every failure before the worker starts. These two fixes were added during the work.
 - The web server factory, request handling, job state, and security controls do not change.
 - No change to environment variables, endpoints, CSV, metrics JSON, or SQLite.
 - Keep the single-process, single-instance assumptions in the README.
