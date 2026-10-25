@@ -17,8 +17,10 @@ class DoorNumberOCR:
             os.environ["FLAGS_use_mkldnn"] = "0"
             os.environ["PADDLE_DISABLE_MKLDNN"] = "1"
             os.environ["FLAGS_enable_pir_in_executor"] = "0"
+            root_level = logging.getLogger().level
             from paddleocr import PaddleOCR
 
+            logging.getLogger().setLevel(root_level)  # Paddle import resets it to WARNING.
             logger = logger or logging.getLogger(__name__)
             logger.info("Loading PaddleOCR model (first run downloads models)...")
             reader = PaddleOCR(

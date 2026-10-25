@@ -551,6 +551,9 @@ def _handle_sigterm(_signum, _frame):
 
 
 def main():
+    # Paddle installs a fatal SIGTERM handler on import; load it before ours so ours wins.
+    import paddle  # noqa: F401
+
     configure_logging()
     signal.signal(signal.SIGTERM, _handle_sigterm)
     server = create_server()
