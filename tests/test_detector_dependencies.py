@@ -57,22 +57,27 @@ class FakeStreetView:
         return self.image_calls, 0
 
 
+_BOX = [[0, 0], [1, 0], [1, 1], [0, 1]]
+
+
+def page(*reads):
+    """One OCR page with (text, confidence) reads."""
+    return [[[_BOX, read] for read in reads]]
+
+
 class FakeOCR:
-    def __init__(self, response=None, error=None):
+    """Returns scripted pages in order; the last page repeats for later images."""
+
+    def __init__(self, pages=None, error=None):
         self.images = []
-        self.response = response
+        self.pages = pages or [page(("2024", 0.99), ("17", 0.90)), page(("17", 1.0))]
         self.error = error
 
     def ocr(self, image):
         self.images.append(image.shape)
         if self.error is not None:
             raise self.error
-        if self.response is not None:
-            return self.response
-        box = [[0, 0], [1, 0], [1, 1], [0, 1]]
-        if len(self.images) == 1:
-            return [[[box, ("2024", 0.99)], [box, ("17", 0.90)]]]
-        return [[[box, ("17", 1.0)]]]
+        return self.pages[min(len(self.images), len(self.pages)) - 1]
 
 
 class DetectorDependencyTests(unittest.TestCase):
@@ -154,6 +159,50 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertNotIn("secret", logs.records[0].getMessage())
         self.assertIn("[REDACTED]", logs.records[0].getMessage())
 
+    def test_real_number_beats_year_watermark_in_the_same_image(self):
+        street_view = FakeStreetView()
+        ocr = FakeOCR([page(("2024", 0.99), ("17", 0.90))])
+        detector = self._make_detector(FakeDatabase(), street_view, ocr)
+
+        result = detector.detect_door_number(41.0, -8.0, heading=90)
+
+        self.assertEqual(result.door_number, "17")
+        self.assertEqual(result.confidence, 90)
+        # A year-like best never stops the sweep early, so every angle is tried.
+        self.assertEqual(len(street_view.requests), 91)
+
+    def test_sweep_continues_past_watermark_fragment_to_a_later_number(self):
+        street_view = FakeStreetView()
+        ocr = FakeOCR([page(("23", 0.99)), page(("17", 0.90))])
+        detector = self._make_detector(FakeDatabase(), street_view, ocr)
+
+        result = detector.detect_door_number(41.0, -8.0, heading=90)
+
+        self.assertEqual(result.door_number, "17")
+        self.assertGreater(len(street_view.requests), 1)
+
+    def test_sweep_stops_on_a_clean_confident_number(self):
+        street_view = FakeStreetView()
+        ocr = FakeOCR([page(("17", 0.95))])
+        detector = self._make_detector(FakeDatabase(), street_view, ocr)
+
+        result = detector.detect_door_number(41.0, -8.0, heading=90)
+
+        self.assertEqual(result.door_number, "17")
+        self.assertEqual(len(street_view.requests), 1)
+
+    def test_supplied_image_uses_the_same_selection_rules(self):
+        street_view = FakeStreetView()
+        ocr = FakeOCR([page(("2024", 0.99), ("17", 0.90))])
+        detector = self._make_detector(FakeDatabase(), street_view, ocr)
+
+        result = detector.detect_door_number(
+            41.0, -8.0, heading=10, pitch=5, image=Image.new("RGB", (2, 2))
+        )
+
+        self.assertEqual(result.door_number, "17")
+        self.assertEqual((result.heading, result.pitch), (10, 5))
+
     def test_detector_resolves_camera_even_with_a_supplied_heading(self):
         street_view = FakeStreetView()
         detector = self._make_detector(FakeDatabase(), street_view, FakeOCR())
@@ -192,7 +241,6 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(street_view.get_call_counts(), (0, 0))
 
     def test_detector_returns_and_persists_each_finished_outcome(self):
-        box = [[0, 0], [1, 0], [1, 1], [0, 1]]
         cases = (
             (
                 DetectionOutcome.NO_IMAGERY,
@@ -209,7 +257,7 @@ class DetectorDependencyTests(unittest.TestCase):
             (
                 DetectionOutcome.LOW_CONFIDENCE,
                 FakeStreetView(),
-                FakeOCR(response=[[[box, ("17", 0.35)]]]),
+                FakeOCR([page(("17", 0.35))]),
                 "Low confidence; manual review recommended.",
             ),
             (

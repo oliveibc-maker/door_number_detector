@@ -2,8 +2,9 @@
 
 import logging
 import re
-from collections import defaultdict
+from collections import Counter
 from dataclasses import dataclass
+from enum import IntEnum
 
 
 @dataclass(frozen=True)
@@ -15,36 +16,43 @@ class Candidate:
     fov: int | None = None
 
 
+@dataclass(frozen=True)
+class Decision:
+    """The chosen candidate, and whether it passes the confidence threshold."""
+
+    candidate: Candidate
+    accepted: bool
+
+
+class Suspicion(IntEnum):
+    CLEAN = 0
+    YEAR_LIKE = 1
+    WATERMARK_FRAGMENT = 2
+
+
 class CandidateSelector:
     def __init__(self, confidence_threshold: int, logger: logging.Logger | None = None):
         self.confidence_threshold = confidence_threshold
         self.logger = logger or logging.getLogger(__name__)
 
     @staticmethod
-    def _suspicion_tier(number: str) -> int:
+    def _suspicion(number: str) -> Suspicion:
         if number == "202" or re.fullmatch(r"(?:19|20|30)\d{2}", number):
-            return 1
+            return Suspicion.YEAR_LIKE
         if number == "2" or re.fullmatch(r"2[0-6]", number):
-            return 2
-        return 0
+            return Suspicion.WATERMARK_FRAGMENT
+        return Suspicion.CLEAN
 
-    @staticmethod
-    def _image_key(candidate: Candidate) -> tuple[int | float | None, int | None, int | None]:
-        return candidate.heading_offset, candidate.pitch, candidate.fov
+    def _qualifies(self, candidate: Candidate) -> bool:
+        return bool(candidate.number) and candidate.confidence >= self.confidence_threshold
 
     def _ranked_candidates(self, candidates: list[Candidate]) -> list[Candidate]:
-        image_votes: dict[str, set[tuple[int | float | None, int | None, int | None]]] = (
-            defaultdict(set)
-        )
-        for candidate in candidates:
-            if candidate.number and candidate.confidence >= self.confidence_threshold:
-                image_votes[candidate.number].add(self._image_key(candidate))
-
+        votes = Counter(candidate.number for candidate in candidates if self._qualifies(candidate))
         return sorted(
             candidates,
             key=lambda candidate: (
                 candidate.confidence,
-                len(image_votes[candidate.number]),
+                votes[candidate.number],
                 len(candidate.number),
             ),
             reverse=True,
@@ -56,33 +64,44 @@ class CandidateSelector:
 
     def should_stop(self, candidates: list[Candidate]) -> bool:
         winner = self.best(candidates)
-        if winner is None or winner.confidence < self.confidence_threshold:
+        if winner is None or not self._qualifies(winner):
             return False
-        if self._suspicion_tier(winner.number):
+        if self._suspicion(winner.number) is not Suspicion.CLEAN:
             self.logger.info(
                 "Early stop skipped for suspicious candidate '%s' — continuing sweep.",
                 winner.number,
             )
             return False
-        return bool(winner.number)
+        return True
 
-    def select(self, candidates: list[Candidate]) -> Candidate | None:
+    def select(self, candidates: list[Candidate]) -> Decision | None:
         ranked = self._ranked_candidates(candidates)
-        winner = ranked[0] if ranked else None
-        if winner is None or not self._suspicion_tier(winner.number):
-            return winner
+        if not ranked:
+            return None
+        chosen = self._swap_suspicious(ranked)
+        return Decision(chosen, accepted=self._qualifies(chosen))
 
-        clean = next(
+    def _first_qualified(
+        self, ranked: list[Candidate], suspicion: Suspicion, excluded: str
+    ) -> Candidate | None:
+        return next(
             (
                 candidate
                 for candidate in ranked
-                if candidate.number
-                and candidate.number != winner.number
-                and not self._suspicion_tier(candidate.number)
-                and candidate.confidence >= self.confidence_threshold
+                if candidate.number != excluded
+                and self._qualifies(candidate)
+                and self._suspicion(candidate.number) is suspicion
             ),
             None,
         )
+
+    def _swap_suspicious(self, ranked: list[Candidate]) -> Candidate:
+        winner = ranked[0]
+        suspicion = self._suspicion(winner.number)
+        if suspicion is Suspicion.CLEAN:
+            return winner
+
+        clean = self._first_qualified(ranked, Suspicion.CLEAN, winner.number)
         if clean is not None:
             self.logger.info(
                 "Replacing suspicious candidate '%s' with clean candidate '%s'.",
@@ -91,25 +110,15 @@ class CandidateSelector:
             )
             return clean
 
-        if self._suspicion_tier(winner.number) == 1:
-            tier_two = next(
-                (
-                    candidate
-                    for candidate in ranked
-                    if candidate.number
-                    and candidate.number != winner.number
-                    and self._suspicion_tier(candidate.number) == 2
-                    and candidate.confidence >= self.confidence_threshold
-                ),
-                None,
-            )
-            if tier_two is not None:
+        if suspicion is Suspicion.YEAR_LIKE:
+            fragment = self._first_qualified(ranked, Suspicion.WATERMARK_FRAGMENT, winner.number)
+            if fragment is not None:
                 self.logger.info(
                     "Replacing year-like candidate '%s' with watermark fragment '%s'.",
                     winner.number,
-                    tier_two.number,
+                    fragment.number,
                 )
-                return tier_two
+                return fragment
 
         self.logger.info(
             "Keeping suspicious candidate '%s' without a qualified alternative.", winner.number

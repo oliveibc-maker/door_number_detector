@@ -1,6 +1,10 @@
 import unittest
 
-from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
+from door_number_detector.core.candidate_selection import (
+    Candidate,
+    CandidateSelector,
+    Decision,
+)
 
 
 def candidate(number, confidence, heading_offset=0):
@@ -13,6 +17,10 @@ def candidate(number, confidence, heading_offset=0):
     )
 
 
+def accepted(winner):
+    return Decision(winner, accepted=True)
+
+
 class CandidateSelectorTests(unittest.TestCase):
     def setUp(self):
         self.selector = CandidateSelector(confidence_threshold=70)
@@ -20,25 +28,28 @@ class CandidateSelectorTests(unittest.TestCase):
     def test_clean_candidate_replaces_year_watermark(self):
         decision = self.selector.select([candidate("2024", 99), candidate("17", 90)])
 
-        self.assertEqual(decision, candidate("17", 90))
+        self.assertEqual(decision, accepted(candidate("17", 90)))
 
     def test_year_is_kept_when_no_qualified_alternative_exists(self):
-        self.assertEqual(self.selector.select([candidate("2024", 99)]), candidate("2024", 99))
+        self.assertEqual(
+            self.selector.select([candidate("2024", 99)]), accepted(candidate("2024", 99))
+        )
         self.assertEqual(
             self.selector.select([candidate("2024", 99), candidate("17", 69)]),
-            candidate("2024", 99),
+            accepted(candidate("2024", 99)),
         )
 
     def test_year_falls_back_to_tier_two_when_no_clean_candidate_exists(self):
         candidates = [candidate("2024", 99), candidate("24", 90)]
 
-        self.assertEqual(self.selector.select(candidates), candidates[1])
+        self.assertEqual(self.selector.select(candidates), accepted(candidates[1]))
 
     def test_tier_two_candidate_is_kept_without_clean_alternative(self):
         for number in ("2", "20", "21", "22", "23", "24", "25", "26"):
             with self.subTest(number=number):
                 self.assertEqual(
-                    self.selector.select([candidate(number, 90)]), candidate(number, 90)
+                    self.selector.select([candidate(number, 90)]),
+                    accepted(candidate(number, 90)),
                 )
 
     def test_newly_suspicious_tiers_yield_to_clean_candidates(self):
@@ -46,7 +57,7 @@ class CandidateSelectorTests(unittest.TestCase):
             with self.subTest(number=number):
                 self.assertEqual(
                     self.selector.select([candidate(number, 99), candidate("17", 90)]),
-                    candidate("17", 90),
+                    accepted(candidate("17", 90)),
                 )
 
     def test_vote_ranking_applies_to_clean_replacements(self):
@@ -57,10 +68,10 @@ class CandidateSelectorTests(unittest.TestCase):
             candidate("12", 90, 3),
         ]
 
-        self.assertEqual(self.selector.select(candidates), candidates[1])
+        self.assertEqual(self.selector.select(candidates), accepted(candidates[1]))
 
     def test_repeated_confident_reads_break_confidence_ties(self):
-        winner = self.selector.select(
+        decision = self.selector.select(
             [
                 candidate("8", 90, 0),
                 candidate("8", 90, 5),
@@ -68,18 +79,39 @@ class CandidateSelectorTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(winner, candidate("8", 90, 0))
+        self.assertEqual(decision, accepted(candidate("8", 90, 0)))
+
+    def test_repeated_reads_in_one_image_count_as_votes(self):
+        decision = self.selector.select(
+            [candidate("8", 90, 0), candidate("8", 90, 0), candidate("12", 90, 0)]
+        )
+
+        self.assertEqual(decision, accepted(candidate("8", 90, 0)))
+
+    def test_reads_below_threshold_do_not_vote(self):
+        decision = self.selector.select(
+            [candidate("8", 90), candidate("8", 69), candidate("12", 90)]
+        )
+
+        self.assertEqual(decision, accepted(candidate("12", 90)))
 
     def test_number_length_breaks_vote_ties(self):
-        winner = self.selector.select([candidate("8", 90), candidate("12", 90)])
+        decision = self.selector.select([candidate("8", 90), candidate("12", 90)])
 
-        self.assertEqual(winner, candidate("12", 90))
+        self.assertEqual(decision, accepted(candidate("12", 90)))
 
-    def test_below_threshold_returns_best_candidate_but_does_not_stop(self):
+    def test_below_threshold_is_rejected_with_best_confidence_seen(self):
         best = candidate("12", 69)
 
-        self.assertEqual(self.selector.select([candidate("8", 60), best]), best)
+        self.assertEqual(
+            self.selector.select([candidate("8", 60), best]), Decision(best, accepted=False)
+        )
         self.assertFalse(self.selector.should_stop([best]))
+
+    def test_image_without_text_is_rejected(self):
+        empty = candidate("", 0)
+
+        self.assertEqual(self.selector.select([empty]), Decision(empty, accepted=False))
 
     def test_empty_candidates_have_no_decision(self):
         self.assertIsNone(self.selector.select([]))
@@ -94,17 +126,24 @@ class CandidateSelectorTests(unittest.TestCase):
         candidates = [candidate("8", 88), candidate("17", 90)]
 
         self.assertTrue(self.selector.should_stop(candidates))
-        self.assertEqual(self.selector.select(candidates), candidates[-1])
+        self.assertEqual(self.selector.select(candidates), accepted(candidates[-1]))
 
-    def test_every_early_stop_candidate_is_the_final_selection(self):
-        numbers = ("2", "17", "20", "23", "202", "2024", "1999", "3001")
+    def test_every_early_stop_candidate_is_the_accepted_final_selection(self):
+        numbers = ("2", "8", "17", "20", "23", "202", "2024", "1999", "3001")
+        confidences = (60, 90, 99)
         for first in numbers:
             for second in numbers:
-                candidates = [candidate(first, 90), candidate(second, 90)]
-                if self.selector.should_stop(candidates):
-                    self.assertEqual(
-                        self.selector.select(candidates), self.selector.best(candidates)
-                    )
+                for first_confidence in confidences:
+                    for second_confidence in confidences:
+                        candidates = [
+                            candidate(first, first_confidence, 0),
+                            candidate(second, second_confidence, 5),
+                        ]
+                        if self.selector.should_stop(candidates):
+                            self.assertEqual(
+                                self.selector.select(candidates),
+                                accepted(self.selector.best(candidates)),
+                            )
 
 
 if __name__ == "__main__":

@@ -206,21 +206,21 @@ class DoorNumberDetector:
                     )
                 )
 
-            best_candidate = self.candidate_selector.select(all_image_candidates)
-            if best_candidate is None:
+            decision = self.candidate_selector.select(all_image_candidates)
+            if decision is None:
                 raise RuntimeError("Candidate selection returned no result for fetched images")
 
-            door_number = best_candidate.number
-            confidence = best_candidate.confidence
-            heading = best_candidate.heading_offset
-            pitch = best_candidate.pitch
+            door_number = decision.candidate.number
+            confidence = decision.candidate.confidence
+            heading = decision.candidate.heading_offset
+            pitch = decision.candidate.pitch
 
             logger.info(
                 f"Best across all passes: '{door_number}' ({confidence}%) "
                 f"at heading_offset={heading} pitch={pitch}"
             )
 
-            success = bool(door_number and confidence >= self.config.confidence_threshold)
+            success = decision.accepted
             error = None
             if not success:
                 error = (
