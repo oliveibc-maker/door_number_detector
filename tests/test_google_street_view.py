@@ -212,11 +212,60 @@ class StreetViewClientTests(unittest.TestCase):
                 self.assertIsNone(image)
                 self.assertNotIn(API_KEY, _formatted(captured.records))
 
+    def test_no_error_case_logs_the_api_key(self):
+        leaked = f"https://maps.example.test/?key={API_KEY}"
+        grey = Image.fromarray(np.full((20, 20, 3), 120, dtype=np.uint8), mode="RGB")
+        camera = CameraPosition(41.1, -8.1, None, False)
+        cases = {
+            "request denied": (
+                lambda f: f.resolve_camera(41.0, -8.0),
+                [metadata_response("REQUEST_DENIED")],
+            ),
+            "lookup http status": (
+                lambda f: f.resolve_camera(41.0, -8.0),
+                [FakeResponse(error=requests.exceptions.HTTPError(leaked))],
+            ),
+            "invalid lookup body": (
+                lambda f: f.resolve_camera(41.0, -8.0),
+                [FakeResponse(data=[leaked])],
+            ),
+            "image http status": (
+                lambda f: f.get_image(camera, 90),
+                [FakeResponse(error=requests.exceptions.HTTPError(leaked))],
+            ),
+            "non-image response": (
+                lambda f: f.get_image(camera, 90),
+                [FakeResponse(headers={"content-type": f"text/html; {leaked}"})],
+            ),
+            "grey placeholder": (lambda f: f.get_image(camera, 90), [image_response(grey)]),
+        }
+
+        for name, (call, responses) in cases.items():
+            with self.subTest(case=name):
+                fetcher = StreetViewFetcher(API_KEY, session=FakeSession(responses))
+                with self.assertLogs(
+                    "door_number_detector.core.google_street_view", level="DEBUG"
+                ) as captured:
+                    call(fetcher)
+                self.assertNotIn(API_KEY, _formatted(captured.records))
+
     def test_heading_math_handles_cardinal_directions_and_wraparound(self):
         self.assertAlmostEqual(StreetViewFetcher.calculate_heading(0, 0, 1, 0), 0)
         self.assertAlmostEqual(StreetViewFetcher.calculate_heading(0, 0, 0, 1), 90)
-        self.assertAlmostEqual(StreetViewFetcher.calculate_heading(0, 179, 0, -179), 90)
         self.assertAlmostEqual(StreetViewFetcher.calculate_heading(0, 0, 0, -1), 270)
+        # Longitude wraps at the antimeridian.
+        self.assertAlmostEqual(StreetViewFetcher.calculate_heading(0, 179, 0, -179), 90)
+        # Heading wraps at north: just west of north is near 360, never negative.
+        self.assertAlmostEqual(StreetViewFetcher.calculate_heading(0, 0, 1, -0.001), 359.94, 2)
+        self.assertAlmostEqual(StreetViewFetcher.calculate_heading(0, 0, 1, 0.001), 0.06, 2)
+
+    def test_image_heading_is_sent_within_0_to_360(self):
+        camera = CameraPosition(41.1, -8.1, None, False)
+        for heading, sent in ((370, 10), (-10, 350), (360, 0)):
+            with self.subTest(heading=heading):
+                session = FakeSession([image_response()])
+                StreetViewFetcher(API_KEY, session=session).get_image(camera, heading)
+                self.assertEqual(session.calls[0][1]["heading"], sent)
 
     def test_usage_counts_match_requests_sent(self):
         session = FakeSession([metadata_response(), image_response()])

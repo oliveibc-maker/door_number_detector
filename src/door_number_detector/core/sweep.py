@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
-from door_number_detector.core.google_street_view import CameraPosition, NoImageryAvailable
+from door_number_detector.core.google_street_view import CameraPosition
 
 DEFAULT_FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
     (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
@@ -46,7 +46,6 @@ class StreetViewSweep:
         fov_sweep = sweep if sweep is not None else DEFAULT_FOV_SWEEP
         candidates: list[Candidate] = []
         done = False
-        no_imagery = False
 
         for fov, heading_offsets, pitch_values in fov_sweep:
             if done:
@@ -81,24 +80,12 @@ class StreetViewSweep:
                         offset,
                         pitch,
                     )
-                    try:
-                        image = self.street_view.get_image(
-                            camera,
-                            heading=(heading + offset) % 360,
-                            pitch=pitch,
-                            fov=fov,
-                        )
-                    except NoImageryAvailable:
-                        self.logger.warning(
-                            "[%s] No Street View imagery for (%s, %s) — aborting sweep.",
-                            pass_label,
-                            latitude,
-                            longitude,
-                        )
-                        no_imagery = True
-                        done = True
-                        break
-
+                    image = self.street_view.get_image(
+                        camera,
+                        heading=(heading + offset) % 360,
+                        pitch=pitch,
+                        fov=fov,
+                    )
                     if image is None:
                         self.logger.warning(
                             "[%s] No image returned for offset=%s pitch=%s",
@@ -149,8 +136,4 @@ class StreetViewSweep:
                         done = True
                         break
 
-        if no_imagery:
-            raise NoImageryAvailable(
-                f"No Street View imagery available for ({latitude}, {longitude})"
-            )
         return candidates
