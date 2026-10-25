@@ -36,6 +36,8 @@ OUTPUT_COLUMNS = [
     "OBSERVATION",
 ]
 
+_NO_IMAGERY_TOKEN = OUTCOME_DETAILS[DetectionOutcome.NO_IMAGERY].csv_prediction_found
+
 
 def _normalize(value: str) -> str:
     return re.sub(r"\s+", "", value.strip().upper())
@@ -233,9 +235,10 @@ def run_detection_batch(
                     success=details.metrics_success,
                     no_imagery=details.metrics_no_imagery,
                 )
-                if outcome is DetectionOutcome.CANCELLED or (
-                    cancel_event is not None and cancel_event.is_set()
-                ):
+                # Only a cancelled outcome skips the row. A detection that finished
+                # while cancel was requested is already saved, so it gets its CSV row
+                # too; the loop then stops before the next row.
+                if outcome is DetectionOutcome.CANCELLED:
                     cancelled_detection = True
                     logger.info("[%s/%s] Cancelled mid-detection — stopping.", row_index, total)
                     break
@@ -246,10 +249,10 @@ def run_detection_batch(
                     errors += 1
                 if details.metrics_no_imagery:
                     no_imagery_count += 1
+                else:
+                    confidence = result.confidence
                 if details.metrics_success:
                     prediction = result.door_number
-                if outcome in (DetectionOutcome.FOUND, DetectionOutcome.LOW_CONFIDENCE):
-                    confidence = result.confidence
 
             match = (
                 "YES"
@@ -280,7 +283,7 @@ def run_detection_batch(
                 "✓ MATCH"
                 if match == "YES"
                 else "📷 NO IMAGERY"
-                if prediction_found == "NO_IMAGERY"
+                if prediction_found == _NO_IMAGERY_TOKEN
                 else "✗ WRONG"
                 if prediction_found == "YES"
                 else "? NOT FOUND"

@@ -10,6 +10,7 @@ import pandas as pd
 from door_number_detector.core.batch import (
     OUTPUT_COLUMNS,
     InvalidExcelWorkbookError,
+    load_already_processed,
     load_excel_dataframe,
     run_detection_batch,
     run_excel_batch,
@@ -19,16 +20,39 @@ from door_number_detector.core.models import DetectionOutcome, DetectionResult
 
 
 class FakeDetector:
-    def __init__(self, results):
+    def __init__(self, results, cancel_during_call=None):
         self.results = iter(results)
         self.calls = []
+        self.cancel_during_call = cancel_during_call
 
     def detect_door_number(self, latitude, longitude, cancel_event=None):
         self.calls.append((latitude, longitude))
+        if self.cancel_during_call == len(self.calls) and cancel_event is not None:
+            cancel_event.set()
         result = next(self.results)
         if isinstance(result, Exception):
             raise result
         return result
+
+
+def _two_row_workbook():
+    return pd.DataFrame(
+        [
+            {"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6},
+            {"NOME_COMPLETO_PORTA": "7", "LATITUDE": 41.3, "LONGITUDE": -8.7},
+        ]
+    )
+
+
+def _found(latitude, longitude, number):
+    return DetectionResult(
+        success=True,
+        outcome=DetectionOutcome.FOUND,
+        latitude=latitude,
+        longitude=longitude,
+        door_number=number,
+        confidence=90,
+    )
 
 
 class FakeMetrics:
@@ -395,28 +419,48 @@ class BatchTests(unittest.TestCase):
         self.assertTrue(metrics.records[0]["no_imagery"])
 
     def test_each_outcome_maps_to_csv_and_metrics_without_detector_client_access(self):
+        def row(prediction, confidence, token, match, observation):
+            return {
+                "LATITUDE": "41.2",
+                "LONGITUDE": "-8.6",
+                "NOME_COMPLETO_PORTA": "12A",
+                "PREDICTION": prediction,
+                "CONFIDENCE": confidence,
+                "PREDICTION_FOUND": token,
+                "MATCH": match,
+                "OBSERVATION": observation,
+            }
+
         cases = (
-            (DetectionOutcome.FOUND, "YES", "", True, False),
+            (DetectionOutcome.FOUND, row("12A", "90", "YES", "YES", ""), True, False),
             (
                 DetectionOutcome.LOW_CONFIDENCE,
-                "NO",
-                "Low confidence; manual review recommended.",
+                row("", "35", "NO", "NO", "Low confidence; manual review recommended."),
                 False,
                 False,
             ),
             (
                 DetectionOutcome.NO_IMAGERY,
-                "NO_IMAGERY",
-                "No Street View imagery available",
+                row("", "0", "NO_IMAGERY", "NO", "No Street View imagery available"),
                 False,
                 True,
             ),
-            (DetectionOutcome.IMAGE_UNAVAILABLE, "NO", "Image unavailable", False, False),
-            (DetectionOutcome.CANCELLED, "NO", "Detection cancelled", False, False),
-            (DetectionOutcome.FAILED, "NO", "Detection failed", False, False),
+            (
+                DetectionOutcome.IMAGE_UNAVAILABLE,
+                row("", "35", "NO", "NO", "Image unavailable"),
+                False,
+                False,
+            ),
+            (DetectionOutcome.CANCELLED, None, False, False),
+            (
+                DetectionOutcome.FAILED,
+                row("", "35", "NO", "NO", "Detection failed"),
+                False,
+                False,
+            ),
         )
 
-        for outcome, token, observation, success, no_imagery in cases:
+        for outcome, expected_row, success, no_imagery in cases:
             with self.subTest(outcome=outcome):
                 result = DetectionResult(
                     success=success,
@@ -455,9 +499,53 @@ class BatchTests(unittest.TestCase):
                 self.assertEqual(metrics.records[0]["no_imagery"], no_imagery)
                 if outcome is DetectionOutcome.FAILED:
                     self.assertTrue(any("1 error(s)" in message for message in logs.output))
-                if rows:
-                    self.assertEqual(rows[0]["PREDICTION_FOUND"], token)
-                    self.assertEqual(rows[0]["OBSERVATION"], observation)
+                if expected_row is not None:
+                    self.assertEqual(rows, [expected_row])
+
+    def test_cancelled_detection_is_left_for_resume(self):
+        cancelled = DetectionResult(
+            success=False,
+            outcome=DetectionOutcome.CANCELLED,
+            latitude=41.3,
+            longitude=-8.7,
+            image_calls=2,
+        )
+        detector = FakeDetector([_found(41.2, -8.6, "12A"), cancelled])
+        metrics = FakeMetrics()
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = run_detection_batch(
+                _two_row_workbook(),
+                Path(directory) / "partial.csv",
+                set(),
+                detector_instance=detector,
+                metrics=metrics,
+            )
+            processed = load_already_processed(output)
+
+        self.assertEqual(processed, {(41.2, -8.6)})
+        self.assertEqual([record["image_calls"] for record in metrics.records], [0, 2])
+
+    def test_finished_detection_is_written_when_cancel_arrives_during_it(self):
+        cancel_event = threading.Event()
+        detector = FakeDetector(
+            [_found(41.2, -8.6, "12A"), _found(41.3, -8.7, "7")], cancel_during_call=1
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = run_detection_batch(
+                _two_row_workbook(),
+                Path(directory) / "raced.csv",
+                set(),
+                detector_instance=detector,
+                cancel_event=cancel_event,
+                metrics=FakeMetrics(),
+            )
+            with output.open(newline="", encoding="utf-8-sig") as output_file:
+                rows = list(csv.DictReader(output_file, delimiter=";"))
+
+        self.assertEqual([row["PREDICTION"] for row in rows], ["12A"])
+        self.assertEqual(detector.calls, [(41.2, -8.6)])
 
 
 if __name__ == "__main__":

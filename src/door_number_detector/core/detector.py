@@ -80,8 +80,26 @@ class DoorNumberDetector:
         after = self.street_view.get_call_counts()
         return after[0] - before[0], after[1] - before[1]
 
+    @staticmethod
+    def _not_found(
+        outcome: DetectionOutcome, latitude, longitude, usage: tuple[int, int]
+    ) -> DetectionResult:
+        details = OUTCOME_DETAILS[outcome]
+        return DetectionResult(
+            success=False,
+            outcome=outcome,
+            latitude=latitude,
+            longitude=longitude,
+            observation=details.observation,
+            error=details.database_message,
+            image_calls=usage[0],
+            metadata_calls=usage[1],
+        )
+
     def _finish_result(self, result: DetectionResult) -> DetectionResult:
-        if result.outcome is DetectionOutcome.CANCELLED:
+        """Save the result when its outcome is persisted; a failed save becomes FAILED."""
+        assert result.outcome is not None
+        if not OUTCOME_DETAILS[result.outcome].persist:
             return result
         try:
             self.db.save_result(result.to_dict())
@@ -89,16 +107,11 @@ class DoorNumberDetector:
             logger.error("Could not save detection result", exc_info=True)
             if result.outcome is DetectionOutcome.FAILED:
                 return result
-            details = OUTCOME_DETAILS[DetectionOutcome.FAILED]
-            return DetectionResult(
-                success=False,
-                outcome=DetectionOutcome.FAILED,
-                latitude=result.latitude,
-                longitude=result.longitude,
-                observation=details.observation,
-                error=details.database_message,
-                image_calls=result.image_calls,
-                metadata_calls=result.metadata_calls,
+            return self._not_found(
+                DetectionOutcome.FAILED,
+                result.latitude,
+                result.longitude,
+                (result.image_calls, result.metadata_calls),
             )
         return result
 
@@ -138,13 +151,7 @@ class DoorNumberDetector:
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
                     return self._finish_result(
-                        DetectionResult(
-                            success=False,
-                            outcome=DetectionOutcome.CANCELLED,
-                            latitude=latitude,
-                            longitude=longitude,
-                            observation=OUTCOME_DETAILS[DetectionOutcome.CANCELLED].observation,
-                        )
+                        self._not_found(DetectionOutcome.CANCELLED, latitude, longitude, (0, 0))
                     )
 
                 camera = self.street_view.resolve_camera(latitude, longitude)
@@ -176,33 +183,23 @@ class DoorNumberDetector:
                 )
 
             if cancel_event is not None and cancel_event.is_set():
-                image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
                 return self._finish_result(
-                    DetectionResult(
-                        success=False,
-                        outcome=DetectionOutcome.CANCELLED,
-                        latitude=latitude,
-                        longitude=longitude,
-                        observation=OUTCOME_DETAILS[DetectionOutcome.CANCELLED].observation,
-                        image_calls=image_calls,
-                        metadata_calls=metadata_calls,
+                    self._not_found(
+                        DetectionOutcome.CANCELLED,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
                     )
                 )
 
             if not all_image_candidates:
                 logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
-                image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
-                details = OUTCOME_DETAILS[DetectionOutcome.IMAGE_UNAVAILABLE]
                 return self._finish_result(
-                    DetectionResult(
-                        success=False,
-                        outcome=DetectionOutcome.IMAGE_UNAVAILABLE,
-                        latitude=latitude,
-                        longitude=longitude,
-                        observation=details.observation,
-                        error=details.database_message,
-                        image_calls=image_calls,
-                        metadata_calls=metadata_calls,
+                    self._not_found(
+                        DetectionOutcome.IMAGE_UNAVAILABLE,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
                     )
                 )
 
@@ -259,36 +256,26 @@ class DoorNumberDetector:
                 f"No Street View imagery available for ({latitude}, {longitude}) — "
                 f"skipping OCR and recording observation."
             )
-            image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
-            details = OUTCOME_DETAILS[DetectionOutcome.NO_IMAGERY]
-            result = DetectionResult(
-                success=False,
-                outcome=DetectionOutcome.NO_IMAGERY,
-                latitude=latitude,
-                longitude=longitude,
-                observation=details.observation,
-                error=details.database_message,
-                image_calls=image_calls,
-                metadata_calls=metadata_calls,
+            return self._finish_result(
+                self._not_found(
+                    DetectionOutcome.NO_IMAGERY,
+                    latitude,
+                    longitude,
+                    self._usage_since(usage_before, track_usage),
+                )
             )
-            return self._finish_result(result)
 
         except Exception as exc:
             message = redact_api_key(str(exc))
             logger.error(f"Error processing coordinate: {message}", exc_info=True)
-            image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
-            details = OUTCOME_DETAILS[DetectionOutcome.FAILED]
-            result = DetectionResult(
-                success=False,
-                outcome=DetectionOutcome.FAILED,
-                latitude=latitude,
-                longitude=longitude,
-                observation=details.observation,
-                error=details.database_message,
-                image_calls=image_calls,
-                metadata_calls=metadata_calls,
+            return self._finish_result(
+                self._not_found(
+                    DetectionOutcome.FAILED,
+                    latitude,
+                    longitude,
+                    self._usage_since(usage_before, track_usage),
+                )
             )
-            return self._finish_result(result)
 
     def process_coordinates_batch(self, coordinates_list: list) -> list:
         results = []

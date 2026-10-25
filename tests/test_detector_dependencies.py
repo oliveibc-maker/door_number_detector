@@ -28,33 +28,34 @@ _DEFAULT_IMAGE = object()
 
 
 class FakeStreetView:
-    def __init__(self, image_result=_DEFAULT_IMAGE, cancel_event=None):
+    """Mirrors the client interface: one camera lookup, then image fetches."""
+
+    def __init__(self, image_result=_DEFAULT_IMAGE, cancel_event=None, resolve_error=None):
         self.requests = []
         self.resolved = []
         self.cameras = []
-        self.image_calls = 0
         self.camera = CameraPosition(41.0, -8.001, None, False)
         self.image_result = (
             Image.new("RGB", (2, 2)) if image_result is _DEFAULT_IMAGE else image_result
         )
         self.cancel_event = cancel_event
+        self.resolve_error = resolve_error
 
     def resolve_camera(self, latitude, longitude):
         self.resolved.append((latitude, longitude))
+        if self.resolve_error is not None:
+            raise self.resolve_error
         return self.camera
 
     def get_image(self, camera, **kwargs):
         self.requests.append((camera, kwargs))
         self.cameras.append(camera)
-        self.image_calls += 1
         if self.cancel_event is not None:
             self.cancel_event.set()
-        if isinstance(self.image_result, Exception):
-            raise self.image_result
         return self.image_result
 
     def get_call_counts(self):
-        return self.image_calls, 0
+        return len(self.requests), len(self.resolved)
 
 
 _BOX = [[0, 0], [1, 0], [1, 1], [0, 1]]
@@ -122,7 +123,7 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(street_view.resolved, [(41.0, -8.0)])
         self.assertEqual(street_view.requests[0][1]["heading"], 90)
         self.assertEqual(result.image_calls, 2)
-        self.assertEqual(result.metadata_calls, 0)
+        self.assertEqual(result.metadata_calls, 1)
         self.assertEqual(database.saved[0]["door_number"], "17")
         self.assertTrue(database.closed)
 
@@ -241,34 +242,39 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(street_view.get_call_counts(), (0, 0))
 
     def test_detector_returns_and_persists_each_finished_outcome(self):
+        grey = None  # the client returns nothing for a grey placeholder
         cases = (
             (
                 DetectionOutcome.NO_IMAGERY,
-                FakeStreetView(NoImageryAvailable("none")),
+                FakeStreetView(resolve_error=NoImageryAvailable("none")),
                 FakeOCR(),
                 "No Street View imagery available",
+                (0, 1),
             ),
             (
                 DetectionOutcome.IMAGE_UNAVAILABLE,
-                FakeStreetView(None),
+                FakeStreetView(grey),
                 FakeOCR(),
                 "Image unavailable",
+                (91, 1),
             ),
             (
                 DetectionOutcome.LOW_CONFIDENCE,
                 FakeStreetView(),
                 FakeOCR([page(("17", 0.35))]),
                 "Low confidence; manual review recommended.",
+                (91, 1),
             ),
             (
                 DetectionOutcome.FAILED,
                 FakeStreetView(),
                 FakeOCR(error=RuntimeError("private failure detail")),
                 "Detection failed",
+                (1, 1),
             ),
         )
 
-        for outcome, street_view, ocr, observation in cases:
+        for outcome, street_view, ocr, observation, usage in cases:
             with self.subTest(outcome=outcome):
                 database = FakeDatabase()
                 detector = self._make_detector(database, street_view, ocr)
@@ -276,7 +282,9 @@ class DetectorDependencyTests(unittest.TestCase):
                 result = detector.detect_door_number(41.0, -8.0, heading=90)
 
                 self.assertEqual(result.outcome, outcome)
+                self.assertFalse(result.success)
                 self.assertEqual(result.observation, observation)
+                self.assertEqual((result.image_calls, result.metadata_calls), usage)
                 if outcome is DetectionOutcome.LOW_CONFIDENCE:
                     self.assertIn("Low confidence", result.error or "")
                 else:
@@ -284,6 +292,20 @@ class DetectorDependencyTests(unittest.TestCase):
                 self.assertEqual(len(database.saved), 1)
                 self.assertEqual(database.saved[0]["outcome"], outcome)
                 self.assertNotIn("private failure detail", result.error or "")
+
+    def test_cancelled_before_the_sweep_makes_no_calls_and_saves_nothing(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        database = FakeDatabase()
+        street_view = FakeStreetView()
+        detector = self._make_detector(database, street_view, FakeOCR())
+
+        result = detector.detect_door_number(41.0, -8.0, heading=90, cancel_event=cancel_event)
+
+        self.assertEqual(result.outcome, DetectionOutcome.CANCELLED)
+        self.assertEqual((result.image_calls, result.metadata_calls), (0, 0))
+        self.assertEqual(street_view.get_call_counts(), (0, 0))
+        self.assertEqual(database.saved, [])
 
     def test_cancelled_sweep_reports_usage_without_persisting(self):
         cancel_event = threading.Event()
@@ -294,7 +316,7 @@ class DetectorDependencyTests(unittest.TestCase):
         result = detector.detect_door_number(41.0, -8.0, heading=90, cancel_event=cancel_event)
 
         self.assertEqual(result.outcome, DetectionOutcome.CANCELLED)
-        self.assertEqual(result.image_calls, 1)
+        self.assertEqual((result.image_calls, result.metadata_calls), (1, 1))
         self.assertEqual(database.saved, [])
 
 

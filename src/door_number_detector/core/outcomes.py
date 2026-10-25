@@ -16,33 +16,36 @@ class OutcomeDetails:
     metrics_no_imagery: bool
 
 
+def _not_found(
+    reason: str, *, token: str = "NO", persist: bool = True, no_imagery: bool = False
+) -> OutcomeDetails:
+    """A non-found outcome: the same safe reason goes to the CSV and the database."""
+    return OutcomeDetails(
+        csv_prediction_found=token,
+        observation=reason,
+        database_status="error",
+        database_message=reason,
+        persist=persist,
+        metrics_success=False,
+        metrics_no_imagery=no_imagery,
+    )
+
+
 OUTCOME_DETAILS = {
-    DetectionOutcome.FOUND: OutcomeDetails("YES", "", "success", None, True, True, False),
-    DetectionOutcome.LOW_CONFIDENCE: OutcomeDetails(
-        "NO",
-        "Low confidence; manual review recommended.",
-        "error",
-        "Low confidence; manual review recommended.",
-        True,
-        False,
-        False,
+    DetectionOutcome.FOUND: OutcomeDetails(
+        csv_prediction_found="YES",
+        observation="",
+        database_status="success",
+        database_message=None,
+        persist=True,
+        metrics_success=True,
+        metrics_no_imagery=False,
     ),
-    DetectionOutcome.NO_IMAGERY: OutcomeDetails(
-        "NO_IMAGERY",
-        "No Street View imagery available",
-        "error",
-        "No Street View imagery available",
-        True,
-        False,
-        True,
+    DetectionOutcome.LOW_CONFIDENCE: _not_found("Low confidence; manual review recommended."),
+    DetectionOutcome.NO_IMAGERY: _not_found(
+        "No Street View imagery available", token="NO_IMAGERY", no_imagery=True
     ),
-    DetectionOutcome.IMAGE_UNAVAILABLE: OutcomeDetails(
-        "NO", "Image unavailable", "error", "Image unavailable", True, False, False
-    ),
-    DetectionOutcome.CANCELLED: OutcomeDetails(
-        "NO", "Detection cancelled", "error", "Detection cancelled", False, False, False
-    ),
-    DetectionOutcome.FAILED: OutcomeDetails(
-        "NO", "Detection failed", "error", "Detection failed", True, False, False
-    ),
+    DetectionOutcome.IMAGE_UNAVAILABLE: _not_found("Image unavailable"),
+    DetectionOutcome.CANCELLED: _not_found("Detection cancelled", persist=False),
+    DetectionOutcome.FAILED: _not_found("Detection failed"),
 }
