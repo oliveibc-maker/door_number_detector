@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from door_number_detector.core.batch import (
+    OUTPUT_COLUMNS,
     InvalidExcelWorkbookError,
     load_excel_dataframe,
     run_detection_batch,
@@ -74,28 +75,47 @@ class BatchTests(unittest.TestCase):
                     with self.assertRaises(InvalidExcelWorkbookError):
                         load_excel_dataframe(input_path)
 
-    def test_excel_batch_rejects_invalid_workbooks_before_detecting(self):
-        workbooks = {
-            "empty": pd.DataFrame(columns=["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]),
-            "missing column": pd.DataFrame([{"NOME_COMPLETO_PORTA": "1", "LATITUDE": 41.2}]),
-        }
+    def test_excel_batch_keeps_cli_contract_for_missing_columns_and_empty_workbooks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name, workbook in workbooks.items():
-                input_path = root / f"{name.replace(' ', '_')}.xlsx"
-                workbook.to_excel(input_path, index=False)
-                output_path = root / f"{input_path.stem}.csv"
-                detector = FakeDetector([])
-                with self.subTest(workbook=name):
-                    with self.assertRaises(InvalidExcelWorkbookError):
-                        run_excel_batch(
-                            input_path,
-                            output_path,
-                            detector_instance=detector,
-                            metrics=FakeMetrics(),
-                        )
-                    self.assertEqual(detector.calls, [])
-                    self.assertFalse(output_path.exists())
+            missing = root / "missing.xlsx"
+            pd.DataFrame([{"NOME_COMPLETO_PORTA": "1", "LATITUDE": 41.2}]).to_excel(
+                missing, index=False
+            )
+            detector = FakeDetector([])
+            with self.assertRaisesRegex(ValueError, r"Missing required columns: \['LONGITUDE'\]"):
+                run_excel_batch(
+                    missing,
+                    root / "missing.csv",
+                    detector_instance=detector,
+                    metrics=FakeMetrics(),
+                )
+            self.assertEqual(detector.calls, [])
+            self.assertFalse((root / "missing.csv").exists())
+
+            empty = root / "empty.xlsx"
+            pd.DataFrame(columns=["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]).to_excel(
+                empty, index=False
+            )
+            run_excel_batch(
+                empty,
+                root / "empty.csv",
+                detector_instance=detector,
+                metrics=FakeMetrics(),
+            )
+            self.assertEqual(detector.calls, [])
+
+    def test_sqlserver_batch_rejects_detector_and_factory_together(self):
+        with patch("door_number_detector.core.batch.query_sqlserver") as query_sqlserver:
+            with self.assertRaises(ValueError):
+                run_sqlserver_batch(
+                    "rua",
+                    "123",
+                    "run.csv",
+                    detector_instance=FakeDetector([]),
+                    detector_factory=lambda: FakeDetector([]),
+                )
+        query_sqlserver.assert_not_called()
 
     def test_excel_batch_reuses_a_preloaded_workbook(self):
         dataframe = pd.DataFrame(
@@ -174,6 +194,65 @@ class BatchTests(unittest.TestCase):
         query_sqlserver.assert_called_once()
         self.assertEqual(events, ["query", ("rows", 1), "detector"])
         self.assertEqual(detector.calls, [(41.2, -8.6)])
+
+    def test_excel_batch_resumes_from_an_existing_csv(self):
+        workbook = pd.DataFrame(
+            [
+                {"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6},
+                {"NOME_COMPLETO_PORTA": "7", "LATITUDE": 41.3, "LONGITUDE": -8.7},
+            ]
+        )
+        detector = FakeDetector(
+            [
+                DetectionResult(
+                    success=True, latitude=41.3, longitude=-8.7, door_number="7", confidence=90
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "input.xlsx"
+            workbook.to_excel(input_path, index=False)
+            existing_csv = root / "previous.csv"
+            with existing_csv.open("w", newline="", encoding="utf-8-sig") as previous:
+                writer = csv.DictWriter(previous, fieldnames=OUTPUT_COLUMNS, delimiter=";")
+                writer.writeheader()
+                writer.writerow({"LATITUDE": 41.2, "LONGITUDE": -8.6})
+
+            result_path = run_excel_batch(
+                input_path,
+                root / "resumed.csv",
+                existing_csv=existing_csv,
+                detector_instance=detector,
+                metrics=FakeMetrics(),
+            )
+            with result_path.open(newline="", encoding="utf-8-sig") as output_file:
+                rows = list(csv.DictReader(output_file, delimiter=";"))
+
+        self.assertEqual(detector.calls, [(41.3, -8.7)])
+        self.assertEqual(len(rows), 2)
+
+    def test_excel_batch_honours_cancellation(self):
+        workbook = pd.DataFrame(
+            [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
+        )
+        detector = FakeDetector([])
+        cancel_event = threading.Event()
+        cancel_event.set()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "input.xlsx"
+            workbook.to_excel(input_path, index=False)
+            result_path = run_excel_batch(
+                input_path,
+                root / "cancelled.csv",
+                detector_instance=detector,
+                cancel_event=cancel_event,
+                metrics=FakeMetrics(),
+            )
+            self.assertTrue(result_path.exists())
+
+        self.assertEqual(detector.calls, [])
 
     def test_cancelled_batch_keeps_header_and_does_not_detect_rows(self):
         dataframe = pd.DataFrame(
