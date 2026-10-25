@@ -6,7 +6,6 @@ import logging
 import math
 import re
 import secrets
-import signal
 import socket
 import threading
 from datetime import datetime
@@ -28,7 +27,7 @@ from door_number_detector.core.sources import (
     FILTER_COLUMNS,
     SourceFilter,
 )
-from door_number_detector.logging_config import configure_logging
+from door_number_detector.runtime import shutdown_process, start_process
 from door_number_detector.web.security import (
     UploadTooLarge,
     is_loopback_host,
@@ -600,16 +599,22 @@ def create_server(host=None, port=None):
     return server_class((host, port), handler)
 
 
-def _handle_sigterm(_signum, _frame):
-    raise KeyboardInterrupt
+def _cancel_active_job():
+    """Set the running batch's cancel event and return its worker, if any."""
+    with _state_lock:
+        cancel_event = _state.get("cancel_event")
+        if cancel_event is not None:
+            cancel_event.set()
+        return _state.get("worker")
+
+
+def _close_detector():
+    if _detector is not None:
+        _detector.close()
 
 
 def main():
-    # Paddle installs a fatal SIGTERM handler on import; load it before ours so ours wins.
-    import paddle  # noqa: F401
-
-    configure_logging()
-    signal.signal(signal.SIGTERM, _handle_sigterm)
+    start_process()
     server = create_server()
     removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
     if removed_uploads:
@@ -625,20 +630,7 @@ def main():
     except KeyboardInterrupt:
         _logger.info("Web server stop requested.")
     finally:
-        with _state_lock:
-            cancel_event = _state.get("cancel_event")
-            if cancel_event is not None:
-                cancel_event.set()
-        server.server_close()
-        with _state_lock:
-            cancel_event = _state.get("cancel_event")
-            worker = _state.get("worker")
-            if cancel_event is not None:
-                cancel_event.set()
-        if worker is not None and worker is not threading.current_thread():
-            worker.join()
-        if _detector is not None:
-            _detector.close()
+        shutdown_process(server, _cancel_active_job, _close_detector)
 
 
 if __name__ == "__main__":
