@@ -184,6 +184,7 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 ├── src/door_number_detector/
 │   ├── cli.py                    # CLI entry point (door-number-detector)
 │   ├── logging_config.py         # Rotating root logger with API-key redaction
+│   ├── runtime.py                # Process startup and shutdown order
 │   ├── core/
 │   │   ├── batch.py              # Shared CSV/resume/detection orchestration
 │   │   ├── config.py             # Environment configuration
