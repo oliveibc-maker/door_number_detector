@@ -1,11 +1,19 @@
 import csv
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
-from door_number_detector.core.batch import run_detection_batch
+from door_number_detector.core.batch import (
+    InvalidExcelWorkbookError,
+    load_excel_dataframe,
+    run_detection_batch,
+    run_excel_batch,
+    run_sqlserver_batch,
+)
 from door_number_detector.core.models import DetectionResult
 
 
@@ -47,6 +55,126 @@ class FakeMetrics:
 
 
 class BatchTests(unittest.TestCase):
+    def test_excel_loader_rejects_empty_and_missing_columns(self):
+        dataframes = (
+            pd.DataFrame(columns=["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]),
+            pd.DataFrame([{"NOME_COMPLETO_PORTA": "1", "LATITUDE": 41.2}]),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "input.xlsx"
+            input_path.touch()
+            for dataframe in dataframes:
+                with (
+                    self.subTest(dataframe=dataframe),
+                    patch(
+                        "door_number_detector.core.batch.read_excel_any",
+                        return_value=dataframe,
+                    ),
+                ):
+                    with self.assertRaises(InvalidExcelWorkbookError):
+                        load_excel_dataframe(input_path)
+
+    def test_excel_batch_reuses_a_preloaded_workbook(self):
+        dataframe = pd.DataFrame(
+            [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
+        )
+        detector = FakeDetector(
+            [
+                DetectionResult(
+                    success=True,
+                    latitude=41.2,
+                    longitude=-8.6,
+                    door_number="12A",
+                    confidence=91,
+                )
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_path = root / "input.xlsx"
+            input_path.touch()
+            with patch("door_number_detector.core.batch.read_excel_any") as read_excel:
+                result_path = run_excel_batch(
+                    input_path,
+                    root / "run.csv",
+                    detector_instance=detector,
+                    metrics=FakeMetrics(),
+                    dataframe=dataframe,
+                )
+            read_excel.assert_not_called()
+
+        self.assertEqual(result_path.suffix, ".csv")
+        self.assertEqual(detector.calls, [(41.2, -8.6)])
+
+    def test_sqlserver_batch_reports_loaded_row_count(self):
+        dataframe = pd.DataFrame(
+            [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
+        )
+        detector = FakeDetector(
+            [
+                DetectionResult(
+                    success=True,
+                    latitude=41.2,
+                    longitude=-8.6,
+                    door_number="12A",
+                    confidence=91,
+                )
+            ]
+        )
+        events = []
+
+        def provide_detector():
+            events.append("detector")
+            return detector
+
+        def record_count(count):
+            events.append(("rows", count))
+
+        def query_rows(*args, **kwargs):
+            events.append("query")
+            return dataframe
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch(
+                "door_number_detector.core.batch.query_sqlserver", side_effect=query_rows
+            ) as query_sqlserver:
+                run_sqlserver_batch(
+                    "rua",
+                    "123",
+                    Path(directory) / "run.csv",
+                    metrics=FakeMetrics(),
+                    on_rows_loaded=record_count,
+                    detector_factory=provide_detector,
+                )
+
+        query_sqlserver.assert_called_once()
+        self.assertEqual(events, ["query", ("rows", 1), "detector"])
+        self.assertEqual(detector.calls, [(41.2, -8.6)])
+
+    def test_cancelled_batch_keeps_header_and_does_not_detect_rows(self):
+        dataframe = pd.DataFrame(
+            [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
+        )
+        detector = FakeDetector([])
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            result_path = run_detection_batch(
+                dataframe,
+                Path(directory) / "cancelled.csv",
+                set(),
+                detector_instance=detector,
+                cancel_event=cancel_event,
+                metrics=FakeMetrics(),
+            )
+            with result_path.open(newline="", encoding="utf-8-sig") as output_file:
+                rows = list(csv.DictReader(output_file, delimiter=";"))
+
+        self.assertEqual(rows, [])
+        self.assertEqual(detector.calls, [])
+
     def test_detection_writes_expected_csv_and_records_metrics(self):
         dataframe = pd.DataFrame(
             [

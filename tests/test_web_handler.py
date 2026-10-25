@@ -36,6 +36,8 @@ def _load_app_with_stubs():
     metrics_module.RunMetrics = Metrics
     batch_module.run_detection_batch = lambda *args, **kwargs: None
     batch_module.run_excel_batch = lambda *args, **kwargs: None
+    batch_module.run_sqlserver_batch = lambda *args, **kwargs: None
+    batch_module.InvalidExcelWorkbookError = type("InvalidExcelWorkbookError", (ValueError,), {})
     sources_module.FILTER_COLUMNS = {
         "localidade": "NOME_LOCALIDADE",
         "freguesia": "NOME_FREGUESIA",
@@ -45,6 +47,7 @@ def _load_app_with_stubs():
     sources_module.SourceFilter = str
     sources_module.query_sqlserver = lambda *args, **kwargs: None
     sources_module.read_excel_any = lambda path: Workbook()
+    batch_module.load_excel_dataframe = lambda path: sources_module.read_excel_any(path)
 
     with patch.dict(
         sys.modules,
@@ -275,22 +278,65 @@ class WebHandlerTests(unittest.TestCase):
         self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
         self.assertFalse(self.app._state["running"])
 
-        invalid_workbook = types.SimpleNamespace(empty=True, columns=set())
-        with patch.object(self.app, "read_excel_any", return_value=invalid_workbook):
+        with patch.object(
+            self.app,
+            "load_excel_dataframe",
+            side_effect=self.app.InvalidExcelWorkbookError("invalid"),
+        ):
             status, _ = self._request("POST", "/api/upload?filename=empty.xlsx", b"data", headers)
         self.assertEqual(status, 400)
         self.assertFalse(self.app._state["running"])
         self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
+
+    def test_upload_rejects_invalid_workbook_and_removes_it(self):
+        with patch.object(
+            self.app,
+            "load_excel_dataframe",
+            side_effect=self.app.InvalidExcelWorkbookError(
+                "The spreadsheet is empty or missing required columns."
+            ),
+        ):
+            status, body = self._request(
+                "POST",
+                "/api/upload?filename=doors.xlsx",
+                b"data",
+                {"X-CSRF-Token": "test-csrf-token"},
+            )
+
+        self.assertEqual(status, 400)
+        self.assertIn(b"missing required columns", body)
+        self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
+
+    def test_sql_worker_updates_total_from_shared_batch_runner(self):
+        cancel_event = self.app._claim_job(total=0)
+        self.assertIsNotNone(cancel_event)
+
+        def run_shared_batch(*args, on_rows_loaded, **kwargs):
+            on_rows_loaded(3)
+
+        with patch.object(self.app, "run_sqlserver_batch", side_effect=run_shared_batch):
+            self.app._run_sqlserver_batch(
+                "rua",
+                "123",
+                Path(self.upload_dir.name) / "sql.csv",
+                cancel_event,
+                self.app.RunMetrics(),
+            )
+
+        self.assertEqual(self.app._state["total"], 3)
+        self.assertFalse(self.app._state["running"])
 
     def test_valid_upload_uses_generated_path_outside_project_root(self):
         worker_started = threading.Event()
         release_worker = threading.Event()
         worker_finished = threading.Event()
         uploaded_paths = []
+        parsed_workbooks = []
         original_finish = self.app._finish_job
 
         def hold_worker(path, *args, **kwargs):
             uploaded_paths.append(Path(path))
+            parsed_workbooks.append(kwargs.get("dataframe"))
             worker_started.set()
             release_worker.wait(10)
 
@@ -300,6 +346,9 @@ class WebHandlerTests(unittest.TestCase):
 
         try:
             with (
+                patch.object(
+                    self.app, "load_excel_dataframe", wraps=self.app.load_excel_dataframe
+                ) as load_workbook,
                 patch.object(self.app, "run_excel_batch", side_effect=hold_worker),
                 patch.object(self.app, "_finish_job", side_effect=signal_finish),
             ):
@@ -315,6 +364,8 @@ class WebHandlerTests(unittest.TestCase):
                 self.assertEqual(uploaded_path.parent, Path(self.upload_dir.name))
                 self.assertRegex(uploaded_path.stem, r"^[0-9a-f]{32}$")
                 self.assertTrue(uploaded_path.exists())
+                load_workbook.assert_called_once_with(uploaded_path)
+                self.assertIsNotNone(parsed_workbooks[0])
                 self.assertFalse(self.app._state["worker"].daemon)
 
                 status, _ = self._request(
@@ -347,7 +398,7 @@ class WebHandlerTests(unittest.TestCase):
         release_parse = threading.Event()
         parse_count = 0
         results = []
-        original_reader = self.app.read_excel_any
+        original_reader = self.app.load_excel_dataframe
 
         def blocking_reader(path):
             nonlocal parse_count
@@ -369,7 +420,7 @@ class WebHandlerTests(unittest.TestCase):
 
         first_upload = threading.Thread(target=upload)
         try:
-            with patch.object(self.app, "read_excel_any", side_effect=blocking_reader):
+            with patch.object(self.app, "load_excel_dataframe", side_effect=blocking_reader):
                 first_upload.start()
                 self.assertTrue(parse_started.wait(2))
                 status, _ = self._request(

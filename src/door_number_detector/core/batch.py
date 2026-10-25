@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -78,6 +79,24 @@ def _get_resume_state(
         len(already_processed),
     )
     return already_processed, existing_path
+
+
+class InvalidExcelWorkbookError(ValueError):
+    """Raised when a workbook has no rows or lacks required source columns."""
+
+
+def validate_excel_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
+    if dataframe.empty or not required_columns.issubset(dataframe.columns):
+        raise InvalidExcelWorkbookError("The spreadsheet is empty or missing required columns.")
+    return dataframe
+
+
+def load_excel_dataframe(input_path: str | Path) -> pd.DataFrame:
+    input_path = Path(input_path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input workbook not found: {input_path}")
+    return validate_excel_dataframe(read_excel_any(input_path))
 
 
 def run_detection_batch(
@@ -307,8 +326,14 @@ def run_sqlserver_batch(
     detector_instance: DoorNumberDetector | None = None,
     cancel_event: threading.Event | None = None,
     metrics: RunMetrics | None = None,
+    on_rows_loaded: Callable[[int], None] | None = None,
+    detector_factory: Callable[[], DoorNumberDetector] | None = None,
 ) -> Path | None:
     dataframe = query_sqlserver(filter_by, filter_value, Config())
+    if on_rows_loaded is not None:
+        on_rows_loaded(len(dataframe))
+    if detector_factory is not None:
+        detector_instance = detector_factory()
     already_processed, existing_path = _get_resume_state(existing_csv)
     return run_detection_batch(
         dataframe,
@@ -328,16 +353,13 @@ def run_excel_batch(
     detector_instance: DoorNumberDetector | None = None,
     cancel_event: threading.Event | None = None,
     metrics: RunMetrics | None = None,
+    dataframe: pd.DataFrame | None = None,
 ) -> Path | None:
     input_path = Path(input_path)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input workbook not found: {input_path}")
-
-    dataframe = read_excel_any(input_path)
-    required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
-    missing = required_columns.difference(dataframe.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
+    if dataframe is None:
+        dataframe = load_excel_dataframe(input_path)
+    else:
+        validate_excel_dataframe(dataframe)
 
     already_processed, existing_path = _get_resume_state(existing_csv)
     return run_detection_batch(

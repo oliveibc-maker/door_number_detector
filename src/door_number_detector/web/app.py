@@ -15,15 +15,18 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
-from door_number_detector.core.batch import run_detection_batch, run_excel_batch
+from door_number_detector.core.batch import (
+    InvalidExcelWorkbookError,
+    load_excel_dataframe,
+    run_excel_batch,
+    run_sqlserver_batch,
+)
 from door_number_detector.core.config import Config
 from door_number_detector.core.metrics import RunMetrics
 from door_number_detector.core.redaction import redact_api_key
 from door_number_detector.core.sources import (
     FILTER_COLUMNS,
     SourceFilter,
-    query_sqlserver,
-    read_excel_any,
 )
 from door_number_detector.logging_config import configure_logging
 from door_number_detector.web.security import (
@@ -139,7 +142,11 @@ def _remove_uploaded_workbook(excel_path: Path) -> None:
 
 
 def _run_batch(
-    excel_path: Path, csv_path: Path, cancel_event: threading.Event, metrics: RunMetrics
+    excel_path: Path,
+    csv_path: Path,
+    cancel_event: threading.Event,
+    metrics: RunMetrics,
+    dataframe: Any,
 ) -> None:
     _logger.info(f"[batch] Excel batch starting — {excel_path.name}")
     error = None
@@ -150,6 +157,7 @@ def _run_batch(
             detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
+            dataframe=dataframe,
         )
     except Exception as exc:
         _logger.exception(f"[batch] Excel batch failed: {exc}")
@@ -171,19 +179,21 @@ def _run_sqlserver_batch(
 ) -> None:
     _logger.info(f"[batch] SQL batch starting — {filter_by}={filter_value!r}")
     error = None
-    try:
-        config = Config()
-        df = query_sqlserver(cast(SourceFilter, filter_by), filter_value, config)
+
+    def set_total(total: int) -> None:
         with _state_lock:
             if _state.get("cancel_event") is cancel_event:
-                _state["total"] = len(df)
-        run_detection_batch(
-            df,
+                _state["total"] = total
+
+    try:
+        run_sqlserver_batch(
+            cast(SourceFilter, filter_by),
+            filter_value,
             csv_path,
-            set(),
-            detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
+            on_rows_loaded=set_total,
+            detector_factory=get_detector,
         )
     except Exception as exc:
         _logger.exception(f"[batch] SQL batch failed: {exc}")
@@ -373,15 +383,12 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
                 with excel_path.open("xb") as uploaded_file:
                     uploaded_file.write(data)
-                workbook = read_excel_any(excel_path)
-                required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
-                if workbook.empty or not required_columns.issubset(workbook.columns):
-                    _finish_job(cancel_event)
-                    _remove_uploaded_workbook(excel_path)
-                    self._send_json(
-                        400, {"error": "The spreadsheet is empty or missing required columns."}
-                    )
-                    return
+                workbook = load_excel_dataframe(excel_path)
+            except InvalidExcelWorkbookError as exc:
+                _finish_job(cancel_event)
+                _remove_uploaded_workbook(excel_path)
+                self._send_json(400, {"error": str(exc)})
+                return
             except Exception as exc:
                 _finish_job(cancel_event)
                 _remove_uploaded_workbook(excel_path)
@@ -417,7 +424,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             try:
                 _start_worker(
                     _run_batch,
-                    (excel_path, csv_path, cancel_event, metrics),
+                    (excel_path, csv_path, cancel_event, metrics, workbook),
                     cancel_event,
                 )
             except Exception as exc:
