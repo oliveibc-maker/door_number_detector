@@ -6,6 +6,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+def _optional_yes_no(name: str) -> str | None:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return None
+    if value in {"true", "yes"}:
+        return "yes"
+    if value in {"false", "no"}:
+        return "no"
+    raise ValueError(f"{name} must be True or False.")
+
+
 class Config:
     """Manages application configuration from .env file."""
 
@@ -105,6 +116,16 @@ class Config:
     def src_db_trusted(self):
         """True → Windows Auth.  False → use SRC_DB_USER / SRC_DB_PASSWORD."""
         return os.getenv("SRC_DB_TRUSTED", "True").lower() == "true"
+
+    @property
+    def src_db_encrypt(self):
+        """Optional ODBC Encrypt override ("yes"/"no"); None keeps the driver default."""
+        return _optional_yes_no("SRC_DB_ENCRYPT")
+
+    @property
+    def src_db_trust_server_certificate(self):
+        """Optional TrustServerCertificate override; only for self-signed internal servers."""
+        return _optional_yes_no("SRC_DB_TRUST_SERVER_CERTIFICATE")
 
     @property
     def src_db_user(self):

@@ -40,21 +40,21 @@ def query_sqlserver(
     column = FILTER_COLUMNS[filter_by]
     import pyodbc
 
+    connection_string = (
+        f"DRIVER={_odbc_value(config.src_db_driver)};"
+        f"SERVER={_odbc_value(config.src_db_server)};"
+        f"DATABASE={_odbc_value(config.src_db_database)};"
+    )
     if config.src_db_trusted:
-        connection_string = (
-            f"DRIVER={_odbc_value(config.src_db_driver)};"
-            f"SERVER={_odbc_value(config.src_db_server)};"
-            f"DATABASE={_odbc_value(config.src_db_database)};"
-            "Trusted_Connection=yes;"
-        )
+        connection_string += "Trusted_Connection=yes;"
     else:
-        connection_string = (
-            f"DRIVER={_odbc_value(config.src_db_driver)};"
-            f"SERVER={_odbc_value(config.src_db_server)};"
-            f"DATABASE={_odbc_value(config.src_db_database)};"
-            f"UID={_odbc_value(config.src_db_user)};"
-            f"PWD={_odbc_value(config.src_db_password)};"
+        connection_string += (
+            f"UID={_odbc_value(config.src_db_user)};PWD={_odbc_value(config.src_db_password)};"
         )
+    if config.src_db_encrypt:
+        connection_string += f"Encrypt={config.src_db_encrypt};"
+    if config.src_db_trust_server_certificate:
+        connection_string += f"TrustServerCertificate={config.src_db_trust_server_certificate};"
 
     query = f"""
         SELECT

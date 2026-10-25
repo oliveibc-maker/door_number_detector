@@ -88,6 +88,8 @@ SRC_DB_DATABASE=GEO_DB
 SRC_DB_TRUSTED=True
 ~~~
 
+ODBC Driver 18 encrypts connections and rejects self-signed server certificates. Prefer installing the issuing CA; for an internal server you trust, set `SRC_DB_TRUST_SERVER_CERTIFICATE=True` (optionally `SRC_DB_ENCRYPT=True|False`). Both are unset by default, which keeps the driver defaults.
+
 Get a Google Street View API key from: https://developers.google.com/maps/documentation/streetview/get-api-key
 
 ---
