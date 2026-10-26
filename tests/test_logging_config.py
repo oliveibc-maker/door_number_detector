@@ -1,15 +1,37 @@
 import io
 import logging
+import sys
 import tempfile
 import unittest
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest.mock import patch
 
-from door_number_detector.logging_config import configure_logging
+from door_number_detector.logging_config import RedactingFormatter, configure_logging
 
 
 class LoggingConfigTests(unittest.TestCase):
+    def test_formatter_redacts_api_keys_in_messages_and_tracebacks(self):
+        formatter = RedactingFormatter("%(message)s")
+        try:
+            raise RuntimeError("https://example.test/?key=secret&size=1")
+        except RuntimeError:
+            record = logging.LogRecord(
+                "test",
+                logging.ERROR,
+                __file__,
+                1,
+                "failed: %s",
+                ("https://example.test/?size=1&KEY=secret2",),
+                sys.exc_info(),
+            )
+
+        output = formatter.format(record)
+
+        self.assertNotIn("secret", output)
+        self.assertIn("[REDACTED]", output)
+        self.assertIn("size=1", output)
+
     def test_configures_rotating_file_and_stream_handlers_once(self):
         root_logger = logging.getLogger()
         original_level = root_logger.level

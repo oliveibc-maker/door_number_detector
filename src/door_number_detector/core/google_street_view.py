@@ -8,6 +8,8 @@ import numpy as np
 import requests
 from PIL import Image
 
+from door_number_detector.core.redaction import redact_api_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -157,7 +159,7 @@ class StreetViewFetcher:
                 logger.warning(
                     "Could not resolve pano location (%s): %s",
                     type(metadata_exc).__name__,
-                    _redact_api_key(str(metadata_exc)),
+                    redact_api_key(str(metadata_exc)),
                 )
                 location = f"{latitude},{longitude}"
                 if heading is None:
@@ -206,10 +208,10 @@ class StreetViewFetcher:
         except NoImageryAvailable:
             raise
         except requests.exceptions.RequestException as exc:
-            logger.error("Error fetching image: %s", _redact_api_key(str(exc)))
+            logger.error("Error fetching image: %s", redact_api_key(str(exc)))
             return None
         except Exception as exc:
-            logger.error("Unexpected error: %s", _redact_api_key(str(exc)))
+            logger.error("Unexpected error: %s", redact_api_key(str(exc)))
             return None
 
     def is_imagery_available(self, latitude, longitude) -> bool:
@@ -221,9 +223,3 @@ class StreetViewFetcher:
             return False
         except Exception:
             return False
-
-
-def _redact_api_key(message: str) -> str:
-    import re
-
-    return re.sub(r"(?i)([?&]key=)[^&\s]+", r"\1[REDACTED]", message)

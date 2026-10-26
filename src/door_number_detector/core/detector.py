@@ -16,6 +16,7 @@ from door_number_detector.core.google_street_view import NoImageryAvailable, Str
 from door_number_detector.core.models import DetectionResult
 from door_number_detector.core.ocr import DoorNumberOCR
 from door_number_detector.core.parsing import BLOCKLIST
+from door_number_detector.core.redaction import redact_api_key
 from door_number_detector.core.sweep import StreetViewSweep
 
 logger = logging.getLogger(__name__)
@@ -350,12 +351,13 @@ class DoorNumberDetector:
             return result
 
         except Exception as exc:
-            logger.error(f"Error processing coordinate: {exc}", exc_info=True)
+            message = redact_api_key(str(exc))
+            logger.error(f"Error processing coordinate: {message}", exc_info=True)
             return DetectionResult(
                 success=False,
                 latitude=latitude,
                 longitude=longitude,
-                error=str(exc),
+                error=message,
             )
 
     def process_coordinates_batch(self, coordinates_list: list) -> list:

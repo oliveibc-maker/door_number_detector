@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 from door_number_detector.core.batch import run_detection_batch, run_excel_batch
 from door_number_detector.core.config import Config
 from door_number_detector.core.metrics import RunMetrics
+from door_number_detector.core.redaction import redact_api_key
 from door_number_detector.core.sources import (
     FILTER_COLUMNS,
     SourceFilter,
@@ -153,7 +154,7 @@ def _run_batch(
     except Exception as exc:
         _logger.exception(f"[batch] Excel batch failed: {exc}")
         if not cancel_event.is_set():
-            error = str(exc)
+            error = redact_api_key(str(exc))
     finally:
         _remove_uploaded_workbook(excel_path)
         _save_metrics(metrics, csv_path)
@@ -187,7 +188,7 @@ def _run_sqlserver_batch(
     except Exception as exc:
         _logger.exception(f"[batch] SQL batch failed: {exc}")
         if not cancel_event.is_set():
-            error = str(exc)
+            error = redact_api_key(str(exc))
     finally:
         _save_metrics(metrics, csv_path)
         _finish_job(cancel_event, error)

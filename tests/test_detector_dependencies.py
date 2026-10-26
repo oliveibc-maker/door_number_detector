@@ -112,6 +112,38 @@ class DetectorDependencyTests(unittest.TestCase):
 
         self.assertNotIn("secret", "\n".join(logs.output))
 
+    def test_unexpected_error_redacts_api_key_in_logs_and_result(self):
+        config = SimpleNamespace(
+            data_dir=Path(self.data_directory.name),
+            debug=False,
+            confidence_threshold=70,
+        )
+        detector = self.detector_type(
+            config=config,
+            database_manager=FakeDatabase(),
+            street_view_fetcher=FakeStreetView(),
+            ocr_engine=FakeOCR(),
+            debug_root=Path(self.data_directory.name) / "debug-unexpected",
+        )
+
+        try:
+            with (
+                patch.object(
+                    detector.sweep,
+                    "fetch_candidates",
+                    side_effect=RuntimeError("failed: https://example.test/?size=1&key=secret"),
+                ),
+                self.assertLogs("door_number_detector.core.detector", level="ERROR") as logs,
+            ):
+                result = detector.detect_door_number(41.0, -8.0, heading=90)
+        finally:
+            detector.close()
+
+        self.assertFalse(result.success)
+        self.assertNotIn("secret", result.error or "")
+        self.assertIn("[REDACTED]", result.error or "")
+        self.assertNotIn("secret", logs.records[0].getMessage())
+
 
 if __name__ == "__main__":
     unittest.main()

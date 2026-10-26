@@ -6,6 +6,14 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from door_number_detector.core.config import Config
+from door_number_detector.core.redaction import redact_api_key
+
+
+class RedactingFormatter(logging.Formatter):
+    """Masks API keys in log messages and exception tracebacks."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_api_key(super().format(record))
 
 
 def configure_logging(data_dir: Path | None = None) -> Path:
@@ -25,7 +33,7 @@ def configure_logging(data_dir: Path | None = None) -> Path:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
+    formatter = RedactingFormatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
     handlers: list[logging.Handler] = [
         RotatingFileHandler(
             log_path,

@@ -40,7 +40,7 @@ RUN useradd --create-home --uid 10001 app \
     && mkdir -p /data/home \
     && chown -R app:app /data
 
-COPY --chown=app:app . .
+COPY --chown=app:app src ./src
 RUN uv sync --locked --no-dev --no-editable && uv cache clean
 
 USER app

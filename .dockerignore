@@ -19,3 +19,6 @@ data
 output_example
 predictions_*.csv
 *.metrics.json
+*.xls
+*.xlsx
+*.xlsm

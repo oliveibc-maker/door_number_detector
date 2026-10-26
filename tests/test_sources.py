@@ -114,7 +114,8 @@ class SqlServerSourceTests(unittest.TestCase):
         self.assertIn("Encrypt=yes;", connection_string)
         self.assertIn("TrustServerCertificate=yes;", connection_string)
 
-    def test_tls_settings_parse_environment_values(self):
+    @patch("door_number_detector.core.config.load_dotenv")
+    def test_tls_settings_parse_environment_values(self, _load_dotenv):
         with patch.dict(
             "os.environ",
             {"SRC_DB_ENCRYPT": "False", "SRC_DB_TRUST_SERVER_CERTIFICATE": "true"},
