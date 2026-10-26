@@ -56,7 +56,10 @@ class Config:
 
     @property
     def database_path(self):
-        return Path(os.getenv("DATABASE_PATH", "door_detector.db")).expanduser().resolve()
+        configured = os.getenv("DATABASE_PATH", "").strip()
+        if not configured:
+            return self.data_dir / "door_detector.db"
+        return Path(configured).expanduser().resolve()
 
     @property
     def max_upload_bytes(self):

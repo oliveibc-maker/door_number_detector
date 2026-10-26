@@ -130,6 +130,22 @@ class SqlServerSourceTests(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             self.assertIsNone(Config(env_file=None).src_db_encrypt)
 
+    @patch("door_number_detector.core.config.load_dotenv")
+    def test_database_path_defaults_under_app_data_dir(self, _load_dotenv):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict("os.environ", {"APP_DATA_DIR": directory}, clear=True):
+                self.assertEqual(
+                    Config(env_file=None).database_path,
+                    Path(directory).resolve() / "door_detector.db",
+                )
+            custom_path = Path(directory) / "custom.db"
+            with patch.dict(
+                "os.environ",
+                {"APP_DATA_DIR": directory, "DATABASE_PATH": str(custom_path)},
+                clear=True,
+            ):
+                self.assertEqual(Config(env_file=None).database_path, custom_path.resolve())
+
     def test_unknown_filter_is_rejected_before_connecting(self):
         config = types.SimpleNamespace()
         with self.assertRaises(ValueError):

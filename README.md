@@ -27,43 +27,17 @@ Runtime dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; `
 
 ## Setup
 
-### Step 1: Create and activate the virtual environment
+### Step 1: Install uv
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) as a standalone tool (not inside the project environment).
+
+### Step 2: Create the virtual environment and install dependencies
 
 ~~~bash
-# If Python 3.11 is your default python:
-python -m venv .venv
-
-# Or, using the Python Launcher (recommended if multiple versions are installed):
-py -3.11 -m venv .venv
-
-# Activate — Linux/macOS
-source .venv/bin/activate
-
-# Activate — Windows PowerShell
-.\.venv\Scripts\Activate.ps1
-
-# Activate — Windows CMD
-.venv\Scripts\activate.bat
-~~~
-
-If PowerShell blocks script execution:
-
-~~~powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-~~~
-
-~~~bash
-# Check the tested Python version.
-python --version
-~~~
-
-### Step 2: Install dependencies
-
-~~~bash
-pip install uv
 uv sync --locked
 ~~~
+
+This creates `.venv` with Python 3.11 (downloaded by uv if needed) and installs the locked dependencies. Run project commands through `uv run`, or activate `.venv` first.
 
 ### Step 3: Configure the environment
 
@@ -136,7 +110,7 @@ Then open **http://127.0.0.1:8080** in your browser.
 ### Option C: Run the web server manually
 
 ~~~bash
-python -m door_number_detector.web.app
+uv run door-number-detector-web
 ~~~
 
 Then open **http://127.0.0.1:8080** in your browser.
@@ -158,14 +132,16 @@ Compose uses Linux host networking so the app remains bound to `127.0.0.1`; conf
 Set `SOURCE`, `FILTER_BY`, and `FILTER_VALUE` in `.env` for SQL Server, or set `SOURCE=excel` and `INPUT_EXCEL` for Excel, then:
 
 ~~~bash
-python -m door_number_detector.cli
+uv run door-number-detector
 ~~~
 
 Supported sources:
 - `SOURCE=sqlserver` — queries SQL Server by `localidade`, `freguesia`, `concelho`, or `rua`
 - `SOURCE=excel` — processes an Excel file with columns `NOME_COMPLETO_PORTA`, `LATITUDE`, `LONGITUDE`
 
-The CLI writes CSV and metrics files under `APP_DATA_DIR/outputs`. Web uploads are temporary and removed after the batch ends; completed CSV/metrics and the SQLite database are retained. Resume remains based on the existing CSV coordinate comparison, so it is suitable for this POC but not a durable source-row identity.
+To resume an interrupted CLI run, set `RESUME_CSV` to the previous output CSV. Its rows are copied into the new CSV and source rows with the same coordinates are skipped. Resume compares latitude/longitude only, so it is suitable for this POC but not a durable source-row identity. The web interface always starts a fresh run.
+
+The CLI writes CSV and metrics files under `APP_DATA_DIR/outputs`. Web uploads are temporary and removed after the batch ends; completed CSV/metrics and the SQLite database (`APP_DATA_DIR/door_detector.db` unless `DATABASE_PATH` is set) are retained.
 
 ---
 
@@ -206,22 +182,25 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 ├── pyproject.toml / uv.lock      # Runtime dependencies and lock
 ├── requirements.txt              # Generated pip-compatible dependency list
 ├── src/door_number_detector/
-│   ├── cli.py                    # CLI entry point
+│   ├── cli.py                    # CLI entry point (door-number-detector)
+│   ├── logging_config.py         # Rotating root logger with API-key redaction
 │   ├── core/
 │   │   ├── batch.py              # Shared CSV/resume/detection orchestration
 │   │   ├── config.py             # Environment configuration
 │   │   ├── database.py           # SQLite result persistence
 │   │   ├── detector.py           # Detection coordinator
 │   │   ├── google_street_view.py # Street View API client
-│   │   ├── logging_config.py     # Rotating root logger
+│   │   ├── metrics.py            # Per-run performance and cost metrics
 │   │   ├── models.py             # Typed detection result
 │   │   ├── ocr.py                # PaddleOCR image processing and scoring
 │   │   ├── parsing.py            # OCR text parsing
+│   │   ├── redaction.py          # API-key redaction helper
 │   │   ├── sweep.py              # Street View image sweep
 │   │   └── sources/              # Excel and SQL Server adapters
 │   └── web/
-│       ├── app.py                # Authenticated loopback HTTP server
+│       ├── app.py                # Authenticated loopback HTTP server (door-number-detector-web)
 │       ├── healthcheck.py        # Container readiness check
+│       ├── security.py           # Upload, CSRF, and loopback helpers
 │       └── templates/            # Web app and offline CSV viewer
 ├── tests/                        # unittest suite for core, sources, OCR, parsing and web
 ├── flowcharts/                   # English/Portuguese Mermaid sources
@@ -246,6 +225,9 @@ uv sync --locked --no-install-project --no-default-groups --group test --group d
 Run the same checks used in CI:
 
 ~~~bash
+export PYTHONPATH=src
+uv lock --check
+uv build
 uv run --locked --no-sync python -m compileall -q src tests
 uv run --locked --no-sync ruff check src tests setup.py
 uv run --locked --no-sync ruff format --check src tests setup.py
@@ -260,6 +242,6 @@ uv run --locked --no-sync python -m unittest discover -s tests -v
 - OCR is handled exclusively by **PaddleOCR** (no Tesseract or EasyOCR required).
 - The pipeline uses **Street View metadata** (free) to locate the nearest panorama and compute camera heading before fetching images (billed at ~€0.0064/image).
 - Door number patterns supported: plain numbers, numbers with letters (e.g. `12A`), and keyword formats such as `LOTE`, `SECTOR`, `BLOCO`.
-- Runs can be **resumed** from an existing CSV — already-processed coordinates are skipped by latitude/longitude. This is best-effort for the POC because multiple doors may share coordinates.
+- CLI runs can be **resumed** with `RESUME_CSV` — already-processed coordinates are skipped by latitude/longitude. This is best-effort for the POC because multiple doors may share coordinates.
 - Logs are written to `APP_DATA_DIR/logs/door_detector.log` (UTF-8).
 - The SQLite database stores all detection results and can be queried from the web interface.

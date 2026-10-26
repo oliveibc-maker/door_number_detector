@@ -25,19 +25,23 @@ def main() -> None:
     source = os.getenv("SOURCE", "sqlserver").strip().lower()
     filter_by = os.getenv("FILTER_BY", "rua").strip().lower()
     filter_value = os.getenv("FILTER_VALUE", "").strip()
+    resume_value = os.getenv("RESUME_CSV", "").strip()
+    resume_csv = Path(resume_value).expanduser() if resume_value else None
 
     if source == "sqlserver":
         if not filter_value:
             raise ValueError("Set FILTER_VALUE to select SQL Server source rows.")
         safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", filter_value).strip("_")[:80] or "filter"
         output_csv = output_dir / f"predictions_{filter_by}_{safe_name}_{timestamp}.csv"
-        run_sqlserver_batch(cast(SourceFilter, filter_by), filter_value, output_csv)
+        run_sqlserver_batch(
+            cast(SourceFilter, filter_by), filter_value, output_csv, existing_csv=resume_csv
+        )
         return
 
     if source == "excel":
         input_workbook = Path(os.getenv("INPUT_EXCEL", str(project_root / "input.xlsx")))
         output_csv = output_dir / f"predictions_{timestamp}.csv"
-        run_excel_batch(input_workbook, output_csv)
+        run_excel_batch(input_workbook, output_csv, existing_csv=resume_csv)
         return
 
     raise ValueError("SOURCE must be either 'sqlserver' or 'excel'.")
