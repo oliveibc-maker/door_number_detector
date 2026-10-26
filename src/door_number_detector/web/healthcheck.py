@@ -9,10 +9,13 @@ from urllib.request import Request, urlopen
 def main() -> None:
     username = os.environ["WEB_USERNAME"]
     password = os.environ["WEB_PASSWORD"]
+    host = os.getenv("WEB_HOST", "127.0.0.1").strip() or "127.0.0.1"
     port = os.getenv("WEB_PORT", "8080")
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
     credentials = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
     request = Request(
-        f"http://127.0.0.1:{port}/api/csrf",
+        f"http://{host}:{port}/api/csrf",
         headers={"Authorization": f"Basic {credentials}"},
     )
     with urlopen(request, timeout=5) as response:

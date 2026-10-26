@@ -81,6 +81,37 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(database.saved[0]["door_number"], "17")
         self.assertTrue(database.closed)
 
+    def test_heading_lookup_error_does_not_log_api_key(self):
+        config = SimpleNamespace(
+            data_dir=Path(self.data_directory.name),
+            debug=False,
+            confidence_threshold=70,
+        )
+        detector = self.detector_type(
+            config=config,
+            database_manager=FakeDatabase(),
+            street_view_fetcher=FakeStreetView(),
+            ocr_engine=FakeOCR(),
+            debug_root=Path(self.data_directory.name) / "debug-redaction",
+        )
+
+        try:
+            with (
+                patch.object(detector.sweep, "fetch_candidates", return_value=[]),
+                patch.object(
+                    detector.street_view,
+                    "get_pano_location",
+                    side_effect=RuntimeError("request failed: https://example.test/?key=secret"),
+                    create=True,
+                ),
+                self.assertLogs("door_number_detector.core.detector", level="WARNING") as logs,
+            ):
+                detector.detect_door_number(41.0, -8.0)
+        finally:
+            detector.close()
+
+        self.assertNotIn("secret", "\n".join(logs.output))
+
 
 if __name__ == "__main__":
     unittest.main()

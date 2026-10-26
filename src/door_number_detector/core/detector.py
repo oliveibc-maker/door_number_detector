@@ -186,7 +186,9 @@ class DoorNumberDetector:
                     except NoImageryAvailable:
                         raise
                     except Exception as exc:
-                        logger.warning(f"Could not compute heading: {exc}. Using 0°.")
+                        logger.warning(
+                            "Could not compute heading (%s). Using 0°.", type(exc).__name__
+                        )
                         _base_heading = 0
 
                 if road_heading is None:

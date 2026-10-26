@@ -1,13 +1,13 @@
 import base64
 import importlib
 import json
+import socket
 import sys
 import tempfile
 import threading
 import types
 import unittest
 from http.client import HTTPConnection
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -95,7 +95,7 @@ class WebHandlerTests(unittest.TestCase):
                 "max_upload_bytes": 8,
             },
         )
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.server = self.app.DoorNumberHTTPServer(("127.0.0.1", 0), handler)
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.start()
 
@@ -230,6 +230,38 @@ class WebHandlerTests(unittest.TestCase):
         ):
             main()
 
+    def test_docker_healthcheck_uses_and_formats_configured_ipv6_host(self):
+        from door_number_detector.web import healthcheck
+
+        response = types.SimpleNamespace(status=200, read=lambda: b'{"csrf_token":"token"}')
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "WEB_USERNAME": "tester",
+                    "WEB_PASSWORD": "secret",
+                    "WEB_HOST": "::1",
+                    "WEB_PORT": "8080",
+                },
+            ),
+            patch.object(healthcheck, "urlopen") as urlopen,
+        ):
+            urlopen.return_value.__enter__.return_value = response
+            healthcheck.main()
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://[::1]:8080/api/csrf")
+
+    def test_server_closes_incomplete_requests_after_socket_timeout(self):
+        self.server.request_timeout = 0.1
+        connection = socket.create_connection(("127.0.0.1", self.server.server_port))
+        connection.settimeout(2)
+        try:
+            connection.sendall(b"GET / HTTP/1.1\r\n")
+            self.assertEqual(connection.recv(1), b"")
+        finally:
+            connection.close()
+
     def test_upload_rejects_unsupported_extension_and_oversize_body(self):
         headers = {"X-CSRF-Token": "test-csrf-token"}
         status, _ = self._request(
@@ -240,6 +272,14 @@ class WebHandlerTests(unittest.TestCase):
 
         status, _ = self._request("POST", "/api/upload?filename=doors.xlsx", b"123456789", headers)
         self.assertEqual(status, 413)
+        self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
+        self.assertFalse(self.app._state["running"])
+
+        invalid_workbook = types.SimpleNamespace(empty=True, columns=set())
+        with patch.object(self.app, "read_excel_any", return_value=invalid_workbook):
+            status, _ = self._request("POST", "/api/upload?filename=empty.xlsx", b"data", headers)
+        self.assertEqual(status, 400)
+        self.assertFalse(self.app._state["running"])
         self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
 
     def test_valid_upload_uses_generated_path_outside_project_root(self):
@@ -301,6 +341,52 @@ class WebHandlerTests(unittest.TestCase):
                 self.assertFalse(self.app._state["running"])
         finally:
             release_worker.set()
+
+    def test_upload_reserves_job_before_parsing_workbook(self):
+        parse_started = threading.Event()
+        release_parse = threading.Event()
+        parse_count = 0
+        results = []
+        original_reader = self.app.read_excel_any
+
+        def blocking_reader(path):
+            nonlocal parse_count
+            parse_count += 1
+            if parse_count == 1:
+                parse_started.set()
+                release_parse.wait(2)
+            return original_reader(path)
+
+        def upload():
+            results.append(
+                self._request(
+                    "POST",
+                    "/api/upload?filename=doors.xlsx",
+                    b"data",
+                    {"X-CSRF-Token": "test-csrf-token"},
+                )
+            )
+
+        first_upload = threading.Thread(target=upload)
+        try:
+            with patch.object(self.app, "read_excel_any", side_effect=blocking_reader):
+                first_upload.start()
+                self.assertTrue(parse_started.wait(2))
+                status, _ = self._request(
+                    "POST",
+                    "/api/upload?filename=second.xlsx",
+                    b"data",
+                    {"X-CSRF-Token": "test-csrf-token"},
+                )
+                self.assertEqual(status, 409)
+                self.assertEqual(parse_count, 1)
+                release_parse.set()
+                first_upload.join(2)
+                self.assertFalse(first_upload.is_alive())
+            self.assertEqual(results[0][0], 200)
+        finally:
+            release_parse.set()
+            first_upload.join(2)
 
     def test_server_factory_binds_loopback_and_rejects_remote_hosts(self):
         config = types.SimpleNamespace(

@@ -69,7 +69,7 @@ _state: dict[str, Any] = {
 _state_lock = threading.Lock()
 
 
-def _claim_job(csv_path=None, total=None, metrics=None):
+def _claim_job(csv_path=None, total=None, metrics=None) -> threading.Event | None:
     with _state_lock:
         if _state["running"]:
             return None
@@ -80,15 +80,20 @@ def _claim_job(csv_path=None, total=None, metrics=None):
                 "error": None,
                 "cancel_event": cancel_event,
                 "worker": None,
+                "csv_path": str(csv_path) if csv_path is not None else None,
+                "total": total if total is not None else 0,
+                "metrics": metrics,
             }
         )
-        if csv_path is not None:
-            _state["csv_path"] = str(csv_path)
-        if total is not None:
-            _state["total"] = total
-        if metrics is not None:
-            _state["metrics"] = metrics
         return cancel_event
+
+
+def _update_job(cancel_event: threading.Event, csv_path, total, metrics) -> bool:
+    with _state_lock:
+        if _state.get("cancel_event") is not cancel_event or cancel_event.is_set():
+            return False
+        _state.update({"csv_path": str(csv_path), "total": total, "metrics": metrics})
+        return True
 
 
 def _finish_job(cancel_event: threading.Event, error=None) -> None:
@@ -125,6 +130,13 @@ def _save_metrics(metrics: RunMetrics, csv_path: Path) -> None:
         _logger.warning(f"[batch] Could not save metrics: {exc}")
 
 
+def _remove_uploaded_workbook(excel_path: Path) -> None:
+    try:
+        excel_path.unlink(missing_ok=True)
+    except OSError as exc:
+        _logger.warning("Could not remove uploaded workbook: %s", exc)
+
+
 def _run_batch(
     excel_path: Path, csv_path: Path, cancel_event: threading.Event, metrics: RunMetrics
 ) -> None:
@@ -143,10 +155,7 @@ def _run_batch(
         if not cancel_event.is_set():
             error = str(exc)
     finally:
-        try:
-            excel_path.unlink(missing_ok=True)
-        except OSError as exc:
-            _logger.warning("[batch] Could not remove uploaded workbook: %s", exc)
+        _remove_uploaded_workbook(excel_path)
         _save_metrics(metrics, csv_path)
         _finish_job(cancel_event, error)
         _logger.info("[batch] Excel batch finished.")
@@ -339,8 +348,25 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
-            data = self._read_body(self.max_upload_bytes)
+            cancel_event = _claim_job()
+            if cancel_event is None:
+                self.close_connection = True
+                self._send_json(409, {"error": "Pipeline already running."})
+                return
+            try:
+                data = self._read_body(self.max_upload_bytes)
+            except Exception as exc:
+                self.close_connection = True
+                _finish_job(cancel_event)
+                _logger.warning("[upload] Could not read request body (%s).", type(exc).__name__)
+                self._send_json(400, {"error": "The uploaded file could not be read."})
+                return
             if data is None:
+                _finish_job(cancel_event)
+                return
+            if cancel_event.is_set():
+                _finish_job(cancel_event)
+                self._send_json(409, {"error": "Upload was cancelled before validation."})
                 return
             try:
                 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -349,13 +375,15 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 workbook = read_excel_any(excel_path)
                 required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
                 if workbook.empty or not required_columns.issubset(workbook.columns):
-                    excel_path.unlink(missing_ok=True)
+                    _finish_job(cancel_event)
+                    _remove_uploaded_workbook(excel_path)
                     self._send_json(
                         400, {"error": "The spreadsheet is empty or missing required columns."}
                     )
                     return
             except Exception as exc:
-                excel_path.unlink(missing_ok=True)
+                _finish_job(cancel_event)
+                _remove_uploaded_workbook(excel_path)
                 _logger.warning("[upload] Rejected spreadsheet (%s).", type(exc).__name__)
                 self._send_json(
                     400,
@@ -365,14 +393,25 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             _logger.info("[upload] Accepted %s bytes as %s", len(data), excel_path.name)
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             csv_path = OUTPUT_DIR / f"predictions_{ts}.csv"
-
-            metrics = RunMetrics()
-            cancel_event = _claim_job(csv_path, len(workbook), metrics)
-            if cancel_event is None:
-                excel_path.unlink(missing_ok=True)
-                self._send_json(409, {"error": "Pipeline already running."})
+            if cancel_event.is_set():
+                _finish_job(cancel_event)
+                _remove_uploaded_workbook(excel_path)
+                self._send_json(409, {"error": "Upload was cancelled before the job started."})
+                return
+            try:
+                OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                metrics = RunMetrics()
+            except Exception as exc:
+                _finish_job(cancel_event)
+                _remove_uploaded_workbook(excel_path)
+                _logger.warning("[upload] Could not prepare batch (%s).", type(exc).__name__)
+                self._send_json(500, {"error": "Could not prepare the batch."})
+                return
+            if not _update_job(cancel_event, csv_path, len(workbook), metrics):
+                _finish_job(cancel_event)
+                _remove_uploaded_workbook(excel_path)
+                self._send_json(409, {"error": "Upload was cancelled before the job started."})
                 return
             try:
                 _start_worker(
@@ -380,9 +419,10 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                     (excel_path, csv_path, cancel_event, metrics),
                     cancel_event,
                 )
-            except RuntimeError as exc:
-                excel_path.unlink(missing_ok=True)
-                _finish_job(cancel_event, str(exc))
+            except Exception as exc:
+                _finish_job(cancel_event)
+                _remove_uploaded_workbook(excel_path)
+                _logger.warning("[upload] Could not start batch worker (%s).", type(exc).__name__)
                 self._send_json(500, {"error": "Could not start the batch worker."})
                 return
 
@@ -512,6 +552,12 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
 class DoorNumberHTTPServer(ThreadingHTTPServer):
     daemon_threads = False
     block_on_close = True
+    request_timeout = 30.0
+
+    def get_request(self):
+        request, client_address = super().get_request()
+        request.settimeout(self.request_timeout)
+        return request, client_address
 
 
 def create_server(host=None, port=None):
