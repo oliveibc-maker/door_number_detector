@@ -937,8 +937,10 @@
     }
     function obsTd(r) {
         const obs = (r.OBSERVATION || '').trim();
-        if (!obs) return `<td style="color:var(--text-faint)">—</td>`;
-        return `<td><span class="badge b-no-imagery" title="${escapeHtml(obs)}">📷 Sem GSV</span></td>`;
+        const nsi = isNoImagery(r);
+        if (!obs && !nsi) return `<td style="color:var(--text-faint)">—</td>`;
+        if (nsi)          return `<td><span class="badge b-no-imagery" title="${escapeHtml(obs || 'Sem Street View')}">📷 Sem GSV</span></td>`;
+        return `<td style="font-size:12px;color:var(--text-muted)">${escapeHtml(obs)}</td>`;
     }
     function confHtml(c) {
         const n = Math.min(100, Math.max(0, parseInt(c, 10) || 0));

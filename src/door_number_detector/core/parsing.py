@@ -12,7 +12,7 @@ DOOR_NUMBER_PATTERN = re.compile(r"[A-Za-z]?\d{1,4}[A-Za-z]?")
 # Street View prints it in the bottom strip and sometimes inside the panorama itself,
 # so a whole OCR line that looks like it is dropped instead of being split into
 # fragments such as "O0G" or "0".
-GOOGLE_WATERMARK_PATTERN = re.compile(r"(?:19|20)\d{2}\s*G[O0Q]|G[O0CQ]{2}[G6CQ]L")
+GOOGLE_WATERMARK_PATTERN = re.compile(r"(?:19|20)\d{2}\s*G[O0Q]\b|G[O0CQ]{2}[G6CQ]L")
 BLOCKLIST: set[str] = {
     "2024G",
     "2023G",

@@ -32,6 +32,15 @@ class OcrParsingTests(unittest.TestCase):
                 self.assertEqual(parse_ocr_text(text, messages.append), [])
                 self.assertIn("ignored Google watermark", messages[0])
 
+    def test_truncated_google_watermark_is_ignored(self):
+        for text in ("© 2023 Go", "2023Go"):
+            with self.subTest(text=text):
+                self.assertEqual(parse_ocr_text(text), [])
+
+    def test_address_labels_that_start_with_go_after_a_year_are_kept(self):
+        self.assertEqual(parse_ocr_text("LOTE 2000 GONCALVES"), ["LOTE2000"])
+        self.assertEqual(parse_ocr_text("BLOCO 1999 GOUVEIA"), ["BLOCO1999"])
+
     def test_door_numbers_near_a_year_g_fragment_are_kept(self):
         self.assertEqual(parse_ocr_text("2024G 15"), ["15"])
         self.assertEqual(parse_ocr_text("G12"), ["G12"])
