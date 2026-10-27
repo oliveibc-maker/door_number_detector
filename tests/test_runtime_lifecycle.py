@@ -243,6 +243,26 @@ class RuntimeLifecycleTests(unittest.TestCase):
             ["server_close", "worker_join(cancelled=True)", "detector_close"],
         )
 
+    def test_server_and_detector_are_closed_when_initial_cancellation_fails(self):
+        from door_number_detector.runtime import shutdown_process
+
+        calls = 0
+
+        def cancel_and_get_worker():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("cancel failed")
+            return None
+
+        server = _FakeServer(self.events, lambda: None)
+        detector = _FakeDetector(self.events)
+
+        with self.assertRaises(RuntimeError):
+            shutdown_process(server, cancel_and_get_worker, detector.close)
+
+        self.assertEqual(self.events, ["server_close", "detector_close"])
+
     def test_shutdown_runs_when_startup_cleanup_fails_after_the_server_is_created(self):
         self.app._detector = _FakeDetector(self.events)
         server = _FakeServer(self.events, lambda: None)

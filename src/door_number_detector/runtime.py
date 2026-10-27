@@ -47,8 +47,10 @@ def shutdown_process(
     still runs if an earlier one raises, and the error is re-raised afterwards.
     """
     try:
-        cancel_and_get_worker()
-        server.server_close()
+        try:
+            cancel_and_get_worker()
+        finally:
+            server.server_close()
     finally:
         try:
             worker = cancel_and_get_worker()
