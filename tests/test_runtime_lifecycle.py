@@ -59,6 +59,12 @@ class _FakeServer:
         self.events.append("server_close")
 
 
+class _FailingCloseServer(_FakeServer):
+    def server_close(self):
+        super().server_close()
+        raise OSError("close failed")
+
+
 class _FakeWorker:
     def __init__(self, events: list[str], cancel_event: threading.Event):
         self.events = events
@@ -74,6 +80,9 @@ class _FakeDetector:
 
     def close(self):
         self.events.append("detector_close")
+
+
+_SIGTERM_KILLS_PROCESS = sys.platform == "win32"
 
 
 def _wait_for_sigterm_to_be_handled():
@@ -169,6 +178,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.assertTrue(seen["effective_info"])
         self.assertTrue((self.data_dir / "logs" / "door_detector.log").exists())
 
+    @unittest.skipIf(_SIGTERM_KILLS_PROCESS, "os.kill(SIGTERM) terminates the process on Windows")
     def test_sigterm_stops_the_server_cleanly(self):
         def on_serve():
             os.kill(os.getpid(), signal.SIGTERM)
@@ -178,6 +188,7 @@ class RuntimeLifecycleTests(unittest.TestCase):
 
         self.assertEqual(self.events, ["paddle_loaded", "serve", "server_close"])
 
+    @unittest.skipIf(_SIGTERM_KILLS_PROCESS, "os.kill(SIGTERM) terminates the process on Windows")
     def test_shutdown_cancels_the_batch_waits_for_the_worker_and_closes_the_detector(self):
         cancel_event = threading.Event()
         self.app._state.update(
@@ -213,6 +224,24 @@ class RuntimeLifecycleTests(unittest.TestCase):
             self._run_main(on_serve)
 
         self.assertEqual(self.events[-2:], ["server_close", "detector_close"])
+
+    def test_worker_and_detector_are_closed_when_server_close_fails(self):
+        cancel_event = threading.Event()
+        self.app._state.update(
+            {"cancel_event": cancel_event, "worker": _FakeWorker(self.events, cancel_event)}
+        )
+        self.app._detector = _FakeDetector(self.events)
+        server = _FailingCloseServer(self.events, lambda: None)
+
+        with patch.object(self.app, "create_server", return_value=server):
+            with self.assertRaises(OSError):
+                self.app.main()
+
+        self.assertTrue(cancel_event.is_set())
+        self.assertEqual(
+            self.events[-3:],
+            ["server_close", "worker_join(cancelled=True)", "detector_close"],
+        )
 
     def test_shutdown_runs_when_startup_cleanup_fails_after_the_server_is_created(self):
         self.app._detector = _FakeDetector(self.events)

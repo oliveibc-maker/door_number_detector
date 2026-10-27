@@ -43,11 +43,16 @@ def shutdown_process(
 
     `cancel_and_get_worker` sets the running batch's cancel event, if any, and returns its
     worker thread (or None). It is called again after the server closes, because
-    closing waits for in-flight requests that may have started a job.
+    closing waits for in-flight requests that may have started a job. Each later step
+    still runs if an earlier one raises, and the error is re-raised afterwards.
     """
-    cancel_and_get_worker()
-    server.server_close()
-    worker = cancel_and_get_worker()
-    if worker is not None and worker is not threading.current_thread():
-        worker.join()
-    close_detector()
+    try:
+        cancel_and_get_worker()
+        server.server_close()
+    finally:
+        try:
+            worker = cancel_and_get_worker()
+            if worker is not None and worker is not threading.current_thread():
+                worker.join()
+        finally:
+            close_detector()
