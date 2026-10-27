@@ -103,7 +103,22 @@ class StreetViewClientTests(unittest.TestCase):
             API_KEY, session=FakeSession([metadata_response("REQUEST_DENIED")])
         )
 
-        self.assertEqual(fetcher.resolve_camera(41.0, -8.0), CameraPosition(41.0, -8.0, None, True))
+        with self.assertLogs("door_number_detector.core.google_street_view") as captured:
+            camera = fetcher.resolve_camera(41.0, -8.0)
+
+        self.assertEqual(camera, CameraPosition(41.0, -8.0, None, True))
+        self.assertIn("status REQUEST_DENIED", _formatted(captured.records))
+
+    def test_free_text_status_is_not_logged(self):
+        status = f"denied for key={API_KEY}"
+        fetcher = StreetViewFetcher(API_KEY, session=FakeSession([metadata_response(status)]))
+
+        with self.assertLogs("door_number_detector.core.google_street_view") as captured:
+            camera = fetcher.resolve_camera(41.0, -8.0)
+
+        self.assertTrue(camera.fallback)
+        self.assertIn("status invalid", _formatted(captured.records))
+        self.assertNotIn(API_KEY, _formatted(captured.records))
 
     def test_http_and_network_lookup_errors_use_fallback_without_leaking_key(self):
         for error_type in (requests.exceptions.HTTPError, requests.exceptions.ConnectionError):

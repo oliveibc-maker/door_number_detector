@@ -2,6 +2,7 @@
 
 import logging
 import math
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
@@ -11,6 +12,8 @@ import requests
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+_STATUS_TOKEN = re.compile(r"[A-Z_]{1,40}")
 
 
 @dataclass(frozen=True)
@@ -61,10 +64,6 @@ class StreetViewFetcher:
         self._metadata_call_count: int = 0
 
     # ── Call-counter helpers ───────────────────────────────────────────────────
-
-    def reset_call_counts(self) -> None:
-        self._image_call_count = 0
-        self._metadata_call_count = 0
 
     def get_call_counts(self) -> tuple[int, int]:
         return self._image_call_count, self._metadata_call_count
@@ -117,8 +116,12 @@ class StreetViewFetcher:
                 f"No Street View panorama within search radius of ({latitude}, {longitude})"
             )
         if status != "OK":
+            # Only a Google status token (e.g. REQUEST_DENIED) is logged, never free text.
+            status_token = (
+                status if isinstance(status, str) and _STATUS_TOKEN.fullmatch(status) else "invalid"
+            )
             logger.warning(
-                "Camera lookup returned an unavailable status; using the requested coordinate."
+                "Camera lookup returned status %s; using the requested coordinate.", status_token
             )
             return CameraPosition(latitude, longitude, None, True)
 
