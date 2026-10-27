@@ -18,6 +18,24 @@ class OcrParsingTests(unittest.TestCase):
         self.assertEqual(parse_ocr_text("LOTE 2024G", messages.append), [])
         self.assertEqual(messages, ["OCR: blocked fragment '2024G' (blocklist)"])
 
+    def test_google_watermark_lines_yield_no_candidates(self):
+        for text in (
+            "© 2026 Google",
+            "2023Go0gle",
+            "0-2023Gocqle",
+            "2026 GOOGLE",
+            "Go0gle",
+            "Google",
+        ):
+            with self.subTest(text=text):
+                messages = []
+                self.assertEqual(parse_ocr_text(text, messages.append), [])
+                self.assertIn("ignored Google watermark", messages[0])
+
+    def test_door_numbers_near_a_year_g_fragment_are_kept(self):
+        self.assertEqual(parse_ocr_text("2024G 15"), ["15"])
+        self.assertEqual(parse_ocr_text("G12"), ["G12"])
+
     def test_empty_text_has_no_candidates(self):
         self.assertEqual(parse_ocr_text("no visible number"), [])
 

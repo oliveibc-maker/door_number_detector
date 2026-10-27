@@ -16,7 +16,7 @@ flowchart TD
     M -->|Não| Z{"Alguma imagem utilizável?"}
     Z -->|Não| N["Resultado: imagem indisponível"]
     Z -->|Sim| R
-    L -->|Sim| O["PaddleOCR na imagem completa ampliada 2x"]
+    L -->|Sim| O["PaddleOCR na imagem sem a faixa da marca de água da Google, ampliada 2x"]
     O --> P["Extrair todos os números lidos na imagem"]
     P --> Q{"Melhor candidato limpo e acima do limiar?"}
     Q -->|"Não, ou fragmento de ano/marca de água"| M

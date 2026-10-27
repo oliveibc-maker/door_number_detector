@@ -16,7 +16,7 @@ flowchart TD
     M -->|No| Z{"Any usable image?"}
     Z -->|No| N["Outcome: image unavailable"]
     Z -->|Yes| R
-    L -->|Yes| O["PaddleOCR on full image, 2x upscaled"]
+    L -->|Yes| O["PaddleOCR on the image without the Google watermark strip, 2x upscaled"]
     O --> P["Parse every number read in the image"]
     P --> Q{"Best candidate clean and at or above threshold?"}
     Q -->|"No, or a year/watermark fragment"| M
