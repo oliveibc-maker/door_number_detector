@@ -17,6 +17,9 @@ ocr_debug/
 *.egg
 
 # Local data and logs
+data/
+door_detector.db
+door_detector.db-*
 *.log
 *.pid
 *.sqlite3
@@ -30,3 +33,5 @@ Thumbs.db
 .env
 
 Portas_Teste.xlsx
+predictions_*.csv
+*.metrics.json

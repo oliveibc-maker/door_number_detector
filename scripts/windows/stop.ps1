@@ -1,0 +1,25 @@
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$pidFile = "$root\server.pid"
+
+Write-Host "Stopping Door Number Detector..." -ForegroundColor Cyan
+
+if (Test-Path $pidFile) {
+    $serverPid = Get-Content $pidFile
+    try {
+        Stop-Process -Id $serverPid -Force -ErrorAction Stop
+        Write-Host "Stopped PID $serverPid." -ForegroundColor Green
+    } catch {
+        Write-Host "PID $serverPid not found — may have already stopped." -ForegroundColor Yellow
+    }
+    Remove-Item $pidFile -Force
+} else {
+    $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*door_number_detector.web.app*" }
+    if ($procs) {
+        $procs | ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force
+            Write-Host "Stopped PID $($_.ProcessId)." -ForegroundColor Green
+        }
+    } else {
+        Write-Host "No running server found." -ForegroundColor Yellow
+    }
+}

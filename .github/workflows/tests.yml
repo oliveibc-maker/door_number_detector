@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install uv==0.13.4
+      - run: uv lock --check
+      - run: uv build
+      - run: uv sync --locked --no-install-project --no-default-groups --group test --group dev
+      - run: uv run --locked --no-sync python -m compileall -q src tests
+      - run: uv run --locked --no-sync ruff check src tests setup.py
+      - run: uv run --locked --no-sync ruff format --check src tests setup.py
+      - run: uv run --locked --no-sync mypy
+      - run: uv run --locked --no-sync python -m unittest discover -s tests -v

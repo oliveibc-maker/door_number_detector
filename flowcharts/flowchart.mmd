@@ -1,35 +1,31 @@
 flowchart TD
-    A[("📄 Input Excel\nNOME_COMPLETO_PORTA\nLAT / LON")] --> B
-
-    B["🔁 entrypoint.py\nBatch Runner"]
-
-    B --> E["🌐 Google Street View API\nget_image(lat, lon)\noffset + multi-heading"]
-
-    E --> F{"Image\nreturned?"}
-    F -- No  --> G["❌ PREDICTION_FOUND = NO\nCONFIDENCE = 0"]
-    F -- Yes --> H
-
-    subgraph OCR ["🔍 OCR Engine (detector.py)"]
-        H["FOV · Heading · Pitch iterations\nMultiple crop zones per shot"]
-        H --> I["PaddleOCR"]
-        I --> J["Number Extraction\nRegex filter (digits, no leading zeros)\nconf_sum + vote_count scoring\nBest candidate = max score across shots"]
-    end
-
-    J --> K{"Match?\nexpected == predicted"}
-    K -- Yes --> L["✓ MATCH"]
-    K -- No  --> M["✗ WRONG / ? NOT FOUND"]
-
-    L --> N
-    M --> N
-
-    N[("📊 Output CSV\nLAT · LON · NOME\nPREDICTION · CONFIDENCE\nPREDICTION_FOUND · MATCH")]
-
-    %% N --> O["🖥️ Web Dashboard\nReal-time results\n& metrics"]
-
-    style A fill:#dbeafe,stroke:#3b82f6
-    style N fill:#dbeafe,stroke:#3b82f6
-    %% style O fill:#f0fdf4,stroke:#22c55e
-    style G fill:#fef2f2,stroke:#ef4444
-    style L fill:#f0fdf4,stroke:#22c55e
-    style M fill:#fef2f2,stroke:#ef4444
-    style OCR fill:#faf5ff,stroke:#8b5cf6
+    A["Start: Web UI or CLI"] --> B{"Input source?"}
+    B -->|Excel workbook| C["Validate required columns"]
+    B -->|SQL Server filter| D["Query source rows"]
+    C --> E["Batch runner"]
+    D --> E
+    E --> F["Process next source row"]
+    F --> G["Street View metadata lookup"]
+    G --> H{"Panorama found?"}
+    H -->|No: ZERO_RESULTS| I["Record no-imagery result"]
+    H -->|Yes| J["Sweep heading offsets, pitch, and FOV"]
+    J --> K["Fetch Street View image"]
+    K --> L{"Usable image?"}
+    L -->|No| M{"More sweep attempts?"}
+    M -->|Yes| J
+    M -->|No| N["Record no prediction"]
+    L -->|Yes| O["PaddleOCR on full image, 2x upscaled"]
+    O --> P["Parse and score OCR candidates"]
+    P --> Q{"Confident result?"}
+    Q -->|No or early-stop suppressed| M
+    Q -->|Yes| R["Select prediction"]
+    I --> S["Return result; persist in SQLite when applicable"]
+    N --> S
+    R --> S
+    S --> T["Compare expected and detected values"]
+    T --> U["Append CSV row"]
+    U --> V{"More source rows?"}
+    V -->|Yes| F
+    V -->|No| W["Write run metrics"]
+    W --> X["APP_DATA_DIR/outputs"]
+    X --> Y["Web dashboard reads status and results"]
