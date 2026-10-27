@@ -337,6 +337,23 @@ class WebHandlerTests(unittest.TestCase):
         self.assertEqual(self.app._state["total"], 3)
         self.assertFalse(self.app._state["running"])
 
+    def test_unexpected_sql_worker_start_failure_releases_the_job(self):
+        with patch.object(self.app, "_start_worker", side_effect=ValueError("boom")):
+            status, body = self._request(
+                "POST",
+                "/api/run_sqlserver",
+                b"filter_by=rua&filter_value=123",
+                {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-CSRF-Token": "test-csrf-token",
+                },
+            )
+
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"boom", body)
+        self.assertFalse(self.app._state["running"])
+        self.assertIsNone(self.app._state["error"])
+
     def test_valid_upload_uses_generated_path_outside_project_root(self):
         worker_started = threading.Event()
         release_worker = threading.Event()

@@ -471,8 +471,9 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                     (filter_by, filter_value, csv_path, cancel_event, metrics),
                     cancel_event,
                 )
-            except RuntimeError as exc:
-                _finish_job(cancel_event, str(exc))
+            except Exception as exc:
+                _finish_job(cancel_event)
+                _logger.warning("[sql] Could not start batch worker (%s).", type(exc).__name__)
                 self._send_json(500, {"error": "Could not start the batch worker."})
                 return
 
@@ -513,16 +514,20 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             if cancel_event is None:
                 self._send_json(409, {"error": "Pipeline already running."})
                 return
+            # Release the job before responding, so a client that gets the response
+            # can start the next job straight away.
+            result = None
             try:
                 result = get_detector().detect_door_number(
                     lat, lon, hdg, pit, cancel_event=cancel_event
                 )
             except Exception:
                 _logger.exception("Single-coordinate analysis failed.")
-                self._send_json(500, {"error": "Detection failed."})
-                return
             finally:
                 _finish_job(cancel_event)
+            if result is None:
+                self._send_json(500, {"error": "Detection failed."})
+                return
             self._send_json(200, result.to_dict())
 
         else:
