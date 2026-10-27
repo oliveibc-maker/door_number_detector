@@ -32,8 +32,6 @@ class StreetViewSweep:
 
     def fetch_candidates(
         self,
-        latitude: float,
-        longitude: float,
         camera: CameraPosition,
         heading,
         pass_label: str = "center",

@@ -31,8 +31,6 @@ class SweepTests(unittest.TestCase):
         sweep = StreetViewSweep(street_view, ocr, CandidateSelector(97))
 
         candidates = sweep.fetch_candidates(
-            41.0,
-            -8.0,
             CameraPosition(41.0, -8.0, None, True),
             90,
             sweep=[(10, [0, 5], [0, -5])],
@@ -54,8 +52,6 @@ class SweepTests(unittest.TestCase):
 
         self.assertEqual(
             sweep.fetch_candidates(
-                41.0,
-                -8.0,
                 CameraPosition(41.0, -8.0, None, True),
                 90,
                 sweep=[(10, [0, 5], [0])],
@@ -72,8 +68,6 @@ class SweepTests(unittest.TestCase):
 
         self.assertEqual(
             sweep.fetch_candidates(
-                41.0,
-                -8.0,
                 CameraPosition(41.0, -8.0, None, True),
                 90,
                 sweep=[(10, [0], [0])],
@@ -88,8 +82,6 @@ class SweepTests(unittest.TestCase):
         sweep = StreetViewSweep(street_view, FakeOcr([]), CandidateSelector(70))
 
         sweep.fetch_candidates(
-            41.0,
-            -8.0,
             CameraPosition(41.0, -8.0, None, False),
             355,
             sweep=[(10, [0, 10, -360], [0])],
@@ -103,8 +95,6 @@ class SweepTests(unittest.TestCase):
         sweep = StreetViewSweep(street_view, ocr, CandidateSelector(70))
 
         candidates = sweep.fetch_candidates(
-            41.0,
-            -8.0,
             CameraPosition(41.0, -8.0, None, True),
             90,
             sweep=[(10, [0, 5], [0])],

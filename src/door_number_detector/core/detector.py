@@ -81,7 +81,7 @@ class DoorNumberDetector:
         return after[0] - before[0], after[1] - before[1]
 
     @staticmethod
-    def _not_found(
+    def _unsuccessful_result(
         outcome: DetectionOutcome, latitude, longitude, usage: tuple[int, int]
     ) -> DetectionResult:
         details = OUTCOME_DETAILS[outcome]
@@ -107,7 +107,7 @@ class DoorNumberDetector:
             logger.error("Could not save detection result", exc_info=True)
             if result.outcome is DetectionOutcome.FAILED:
                 return result
-            return self._not_found(
+            return self._unsuccessful_result(
                 DetectionOutcome.FAILED,
                 result.latitude,
                 result.longitude,
@@ -151,7 +151,9 @@ class DoorNumberDetector:
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
                     return self._finish_result(
-                        self._not_found(DetectionOutcome.CANCELLED, latitude, longitude, (0, 0))
+                        self._unsuccessful_result(
+                            DetectionOutcome.CANCELLED, latitude, longitude, (0, 0)
+                        )
                     )
 
                 camera = self.street_view.resolve_camera(latitude, longitude)
@@ -171,8 +173,6 @@ class DoorNumberDetector:
                 # Pass 1 — direct heading, normal offsets (±30°)
                 logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
                 all_image_candidates = self.sweep.fetch_candidates(
-                    latitude,
-                    longitude,
                     camera,
                     _base_heading,
                     pass_label="direct",
@@ -184,7 +184,7 @@ class DoorNumberDetector:
 
             if cancel_event is not None and cancel_event.is_set():
                 return self._finish_result(
-                    self._not_found(
+                    self._unsuccessful_result(
                         DetectionOutcome.CANCELLED,
                         latitude,
                         longitude,
@@ -195,7 +195,7 @@ class DoorNumberDetector:
             if not all_image_candidates:
                 logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
                 return self._finish_result(
-                    self._not_found(
+                    self._unsuccessful_result(
                         DetectionOutcome.IMAGE_UNAVAILABLE,
                         latitude,
                         longitude,
@@ -257,7 +257,7 @@ class DoorNumberDetector:
                 f"skipping OCR and recording observation."
             )
             return self._finish_result(
-                self._not_found(
+                self._unsuccessful_result(
                     DetectionOutcome.NO_IMAGERY,
                     latitude,
                     longitude,
@@ -269,7 +269,7 @@ class DoorNumberDetector:
             message = redact_api_key(str(exc))
             logger.error(f"Error processing coordinate: {message}", exc_info=True)
             return self._finish_result(
-                self._not_found(
+                self._unsuccessful_result(
                     DetectionOutcome.FAILED,
                     latitude,
                     longitude,

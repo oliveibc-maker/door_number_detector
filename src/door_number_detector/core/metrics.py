@@ -39,7 +39,7 @@ class RunMetrics:
     elapsed = time.perf_counter() - t0
     metrics.record(elapsed, result.image_calls, result.metadata_calls,
                    success=result.success,
-                   no_imagery=result.outcome == "no_imagery")
+                   no_imagery=result.outcome is DetectionOutcome.NO_IMAGERY)
 
     # at the end of the run:
     metrics.print_summary()
