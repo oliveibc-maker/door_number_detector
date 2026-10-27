@@ -12,6 +12,7 @@ from door_number_detector.core.parsing import parse_ocr_text
 
 # Street View draws its logo and copyright text in the bottom strip of every image.
 WATERMARK_STRIP_FRACTION = 0.06
+WATERMARK_CORNER_WIDTH_FRACTION = 0.15
 
 
 class DoorNumberOCR:
@@ -49,7 +50,11 @@ class DoorNumberOCR:
     def extract_door_number(self, image: Image.Image) -> list[Candidate]:
         cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         height = cv_image.shape[0]
-        cv_image = cv_image[: height - int(height * WATERMARK_STRIP_FRACTION)]
+        watermark_height = int(height * WATERMARK_STRIP_FRACTION)
+        watermark_width = int(cv_image.shape[1] * WATERMARK_CORNER_WIDTH_FRACTION)
+        if watermark_height and watermark_width:
+            cv_image[height - watermark_height :, :watermark_width] = 0
+            cv_image[height - watermark_height :, -watermark_width:] = 0
         scan_image = self._upscale(cv_image, scale=2)
         candidates: list[Candidate] = []
 

@@ -252,6 +252,16 @@ class DoorNumberDetector:
             return self._finish_result(result)
 
         except NoImageryAvailable:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(f"Cancelled while resolving imagery for ({latitude}, {longitude}).")
+                return self._finish_result(
+                    self._unsuccessful_result(
+                        DetectionOutcome.CANCELLED,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
+                    )
+                )
             logger.warning(
                 f"No Street View imagery available for ({latitude}, {longitude}) — "
                 f"skipping OCR and recording observation."
@@ -266,6 +276,16 @@ class DoorNumberDetector:
             )
 
         except Exception as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(f"Cancelled while processing ({latitude}, {longitude}).")
+                return self._finish_result(
+                    self._unsuccessful_result(
+                        DetectionOutcome.CANCELLED,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
+                    )
+                )
             message = redact_api_key(str(exc))
             logger.error(f"Error processing coordinate: {message}", exc_info=True)
             return self._finish_result(

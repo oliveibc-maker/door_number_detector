@@ -30,7 +30,13 @@ _DEFAULT_IMAGE = object()
 class FakeStreetView:
     """Mirrors the client interface: one camera lookup, then image fetches."""
 
-    def __init__(self, image_result=_DEFAULT_IMAGE, cancel_event=None, resolve_error=None):
+    def __init__(
+        self,
+        image_result=_DEFAULT_IMAGE,
+        cancel_event=None,
+        resolve_error=None,
+        cancel_on_resolve_error=False,
+    ):
         self.requests = []
         self.resolved = []
         self.cameras = []
@@ -40,10 +46,13 @@ class FakeStreetView:
         )
         self.cancel_event = cancel_event
         self.resolve_error = resolve_error
+        self.cancel_on_resolve_error = cancel_on_resolve_error
 
     def resolve_camera(self, latitude, longitude):
         self.resolved.append((latitude, longitude))
         if self.resolve_error is not None:
+            if self.cancel_on_resolve_error and self.cancel_event is not None:
+                self.cancel_event.set()
             raise self.resolve_error
         return self.camera
 
@@ -69,14 +78,17 @@ def page(*reads):
 class FakeOCR:
     """Returns scripted pages in order; the last page repeats for later images."""
 
-    def __init__(self, pages=None, error=None):
+    def __init__(self, pages=None, error=None, cancel_event=None):
         self.images = []
         self.pages = pages or [page(("2024", 0.99), ("17", 0.90)), page(("17", 1.0))]
         self.error = error
+        self.cancel_event = cancel_event
 
     def ocr(self, image):
         self.images.append(image.shape)
         if self.error is not None:
+            if self.cancel_event is not None:
+                self.cancel_event.set()
             raise self.error
         return self.pages[min(len(self.images), len(self.pages)) - 1]
 
@@ -314,6 +326,35 @@ class DetectorDependencyTests(unittest.TestCase):
         database = FakeDatabase()
         street_view = FakeStreetView(cancel_event=cancel_event)
         detector = self._make_detector(database, street_view, FakeOCR())
+
+        result = detector.detect_door_number(41.0, -8.0, heading=90, cancel_event=cancel_event)
+
+        self.assertEqual(result.outcome, DetectionOutcome.CANCELLED)
+        self.assertEqual((result.image_calls, result.metadata_calls), (1, 1))
+        self.assertEqual(database.saved, [])
+
+    def test_cancelled_no_imagery_exception_reports_usage_without_persisting(self):
+        cancel_event = threading.Event()
+        database = FakeDatabase()
+        street_view = FakeStreetView(
+            cancel_event=cancel_event,
+            resolve_error=NoImageryAvailable("none"),
+            cancel_on_resolve_error=True,
+        )
+        detector = self._make_detector(database, street_view, FakeOCR())
+
+        result = detector.detect_door_number(41.0, -8.0, heading=90, cancel_event=cancel_event)
+
+        self.assertEqual(result.outcome, DetectionOutcome.CANCELLED)
+        self.assertEqual((result.image_calls, result.metadata_calls), (0, 1))
+        self.assertEqual(database.saved, [])
+
+    def test_cancelled_failure_exception_reports_usage_without_persisting(self):
+        cancel_event = threading.Event()
+        database = FakeDatabase()
+        street_view = FakeStreetView()
+        ocr = FakeOCR(error=RuntimeError("cancelled during OCR"), cancel_event=cancel_event)
+        detector = self._make_detector(database, street_view, ocr)
 
         result = detector.detect_door_number(41.0, -8.0, heading=90, cancel_event=cancel_event)
 
