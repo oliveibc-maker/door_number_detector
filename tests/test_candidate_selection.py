@@ -118,7 +118,9 @@ class CandidateSelectorTests(unittest.TestCase):
         self.assertFalse(self.selector.should_stop([]))
 
     def test_suspicious_candidates_never_stop_the_sweep(self):
-        for number in ("2", "20", "23", "202", "2024", "1999", "3001"):
+        tier_2 = ("2", "20", "21", "22", "23", "24", "25", "26")
+        year_like = ("202", "1900", "1999", "2000", "2024", "2099", "3000", "3001")
+        for number in tier_2 + year_like:
             with self.subTest(number=number):
                 self.assertFalse(self.selector.should_stop([candidate(number, 99)]))
 
