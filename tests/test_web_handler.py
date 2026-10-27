@@ -508,17 +508,7 @@ VALID_COLUMNS = ["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]
 VALID_ROWS = [["12A", 41.2, -8.6]]
 
 
-class _FakeStreetView:
-    def reset_call_counts(self):
-        pass
-
-    def get_call_counts(self):
-        return (1, 1)
-
-
 class _FakeDetector:
-    street_view = _FakeStreetView()
-
     def detect_door_number(self, latitude, longitude, cancel_event=None):
         return DetectionResult(
             success=True,

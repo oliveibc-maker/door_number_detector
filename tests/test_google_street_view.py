@@ -165,8 +165,9 @@ class StreetViewClientTests(unittest.TestCase):
             fetcher = StreetViewFetcher(API_KEY, session=session)
             fetcher.resolve_camera(1.0, 1.0)
             fetcher.resolve_camera(2.0, 2.0)
-            fetcher.resolve_camera(3.0, 3.0)
             fetcher.resolve_camera(1.0, 1.0)
+            fetcher.resolve_camera(3.0, 3.0)
+            fetcher.resolve_camera(2.0, 2.0)
 
         self.assertEqual(len(session.calls), 4)
 

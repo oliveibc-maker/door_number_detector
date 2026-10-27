@@ -117,6 +117,7 @@ class DetectorDependencyTests(unittest.TestCase):
             detector.close()
 
         self.assertTrue(result.success)
+        self.assertEqual(result.outcome, DetectionOutcome.FOUND)
         self.assertEqual(result.door_number, "17")
         self.assertEqual(ocr.images, [(4, 4, 3), (4, 4, 3)])
         self.assertEqual(len(street_view.requests), 2)
@@ -125,6 +126,7 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(result.image_calls, 2)
         self.assertEqual(result.metadata_calls, 1)
         self.assertEqual(database.saved[0]["door_number"], "17")
+        self.assertEqual(database.saved[0]["outcome"], DetectionOutcome.FOUND)
         self.assertTrue(database.closed)
 
     def test_unexpected_error_redacts_api_key_in_logs_and_result(self):

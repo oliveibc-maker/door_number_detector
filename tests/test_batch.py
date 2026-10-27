@@ -35,6 +35,14 @@ class FakeDetector:
         return result
 
 
+class CountingStreetView:
+    def __init__(self):
+        self.call_counts = (10, 4)
+
+    def get_call_counts(self):
+        return self.call_counts
+
+
 def _two_row_workbook():
     return pd.DataFrame(
         [
@@ -150,18 +158,24 @@ class BatchTests(unittest.TestCase):
             root = Path(directory)
             input_path = root / "input.xlsx"
             input_path.touch()
+            metrics = FakeMetrics()
             with patch("door_number_detector.core.batch.read_excel_any") as read_excel:
                 result_path = run_excel_batch(
                     input_path,
                     root / "run.csv",
                     detector_instance=detector,
-                    metrics=FakeMetrics(),
+                    metrics=metrics,
                     dataframe=dataframe,
                 )
             read_excel.assert_not_called()
+            with result_path.open(newline="", encoding="utf-8-sig") as output_file:
+                rows = list(csv.DictReader(output_file, delimiter=";"))
 
         self.assertEqual(result_path.suffix, ".csv")
         self.assertEqual(detector.calls, [(41.2, -8.6)])
+        self.assertEqual(rows[0]["PREDICTION"], "12A")
+        self.assertEqual(rows[0]["MATCH"], "YES")
+        self.assertEqual(metrics.records[0]["image_calls"], 3)
 
     def test_sqlserver_batch_reports_loaded_row_count(self):
         dataframe = pd.DataFrame(
@@ -194,10 +208,8 @@ class BatchTests(unittest.TestCase):
             return dataframe
 
         with tempfile.TemporaryDirectory() as directory:
-            with patch(
-                "door_number_detector.core.batch.query_sqlserver", side_effect=query_rows
-            ) as query_sqlserver:
-                run_sqlserver_batch(
+            with patch("door_number_detector.core.batch.query_sqlserver", side_effect=query_rows):
+                result_path = run_sqlserver_batch(
                     "rua",
                     "123",
                     Path(directory) / "run.csv",
@@ -205,10 +217,13 @@ class BatchTests(unittest.TestCase):
                     on_rows_loaded=record_count,
                     detector_factory=provide_detector,
                 )
+            with result_path.open(newline="", encoding="utf-8-sig") as output_file:
+                rows = list(csv.DictReader(output_file, delimiter=";"))
 
-        query_sqlserver.assert_called_once()
         self.assertEqual(events, ["query", ("rows", 1), "detector"])
         self.assertEqual(detector.calls, [(41.2, -8.6)])
+        self.assertEqual(rows[0]["PREDICTION"], "12A")
+        self.assertEqual(rows[0]["MATCH"], "YES")
 
     def test_excel_batch_resumes_from_an_existing_csv(self):
         workbook = pd.DataFrame(
@@ -501,6 +516,32 @@ class BatchTests(unittest.TestCase):
                     self.assertTrue(any("1 error(s)" in message for message in logs.output))
                 if expected_row is not None:
                     self.assertEqual(rows, [expected_row])
+
+    def test_unexpected_detection_exception_records_street_view_call_delta(self):
+        detector = FakeDetector([])
+        detector.street_view = CountingStreetView()
+
+        def detect_with_calls(latitude, longitude, cancel_event=None):
+            detector.street_view.call_counts = (15, 6)
+            raise RuntimeError("detector failed unexpectedly")
+
+        detector.detect_door_number = detect_with_calls
+        dataframe = pd.DataFrame(
+            [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
+        )
+        metrics = FakeMetrics()
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_detection_batch(
+                dataframe,
+                Path(directory) / "failed.csv",
+                set(),
+                detector_instance=detector,
+                metrics=metrics,
+            )
+
+        self.assertEqual(metrics.records[0]["image_calls"], 5)
+        self.assertEqual(metrics.records[0]["metadata_calls"], 2)
 
     def test_cancelled_detection_is_left_for_resume(self):
         cancelled = DetectionResult(
