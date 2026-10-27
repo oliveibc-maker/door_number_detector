@@ -28,7 +28,13 @@ flowchart TD
     N --> S
     R3 --> S
     R4 --> S
-    S --> T["Comparar valor esperado e detetado"]
+    J -.->|Cancelamento pedido| CA["Resultado: cancelado"]
+    J -.->|Erro inesperado| FA["Resultado: falhou"]
+    CA --> S
+    FA --> S
+    S --> SC{"Cancelado?"}
+    SC -->|"Sim: sem linha no CSV; o registo fica para retomar"| W
+    SC -->|Não| T["Comparar valor esperado e detetado"]
     T --> U["Acrescentar linha ao CSV"]
     U --> V{"Há mais registos?"}
     V -->|Sim| F

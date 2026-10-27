@@ -28,7 +28,13 @@ flowchart TD
     N --> S
     R3 --> S
     R4 --> S
-    S --> T["Compare expected and detected values"]
+    J -.->|Cancel requested| CA["Outcome: cancelled"]
+    J -.->|Unexpected error| FA["Outcome: failed"]
+    CA --> S
+    FA --> S
+    S --> SC{"Cancelled?"}
+    SC -->|"Yes: no CSV row; the row is left for resume"| W
+    SC -->|No| T["Compare expected and detected values"]
     T --> U["Append CSV row"]
     U --> V{"More source rows?"}
     V -->|Yes| F
