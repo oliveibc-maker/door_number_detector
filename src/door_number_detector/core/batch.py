@@ -53,12 +53,6 @@ def _append_row_to_csv(output_path: Path, row_data: list) -> None:
         csv.writer(output_file, delimiter=";").writerow(row_data)
 
 
-def _street_view_call_counts(detector: DoorNumberDetector) -> tuple[int, int]:
-    street_view = getattr(detector, "street_view", None)
-    get_call_counts = getattr(street_view, "get_call_counts", None)
-    return get_call_counts() if callable(get_call_counts) else (0, 0)
-
-
 def load_already_processed(existing_csv: Path) -> set[tuple[float, float]]:
     processed = set()
     with Path(existing_csv).open(newline="", encoding="utf-8-sig") as input_file:
@@ -193,7 +187,6 @@ def run_detection_batch(
                 logger.warning("[%s/%s] Skipping row with null coordinates.", row_index, total)
             else:
                 started_at = time.perf_counter()
-                usage_before = _street_view_call_counts(detector)
                 try:
                     result = detector.detect_door_number(
                         float(latitude), float(longitude), cancel_event=cancel_event
@@ -223,11 +216,13 @@ def run_detection_batch(
                             failed_details.observation,
                         ],
                     )
-                    usage_after = _street_view_call_counts(detector)
+                    # Usage reaches the batch only through a returned result. The
+                    # detector turns its own errors into FAILED results with usage,
+                    # so only a defect in that handling lands here.
                     metrics.record(
                         elapsed_s=time.perf_counter() - started_at,
-                        image_calls=usage_after[0] - usage_before[0],
-                        metadata_calls=usage_after[1] - usage_before[1],
+                        image_calls=0,
+                        metadata_calls=0,
                         success=False,
                         no_imagery=False,
                     )

@@ -35,14 +35,6 @@ class FakeDetector:
         return result
 
 
-class CountingStreetView:
-    def __init__(self):
-        self.call_counts = (10, 4)
-
-    def get_call_counts(self):
-        return self.call_counts
-
-
 def _two_row_workbook():
     return pd.DataFrame(
         [
@@ -517,31 +509,33 @@ class BatchTests(unittest.TestCase):
                 if expected_row is not None:
                     self.assertEqual(rows, [expected_row])
 
-    def test_unexpected_detection_exception_records_street_view_call_delta(self):
-        detector = FakeDetector([])
-        detector.street_view = CountingStreetView()
-
-        def detect_with_calls(latitude, longitude, cancel_event=None):
-            detector.street_view.call_counts = (15, 6)
-            raise RuntimeError("detector failed unexpectedly")
-
-        detector.detect_door_number = detect_with_calls
-        dataframe = pd.DataFrame(
-            [{"NOME_COMPLETO_PORTA": "12A", "LATITUDE": 41.2, "LONGITUDE": -8.6}]
+    def test_unexpected_detection_exception_writes_failed_row_and_continues(self):
+        detector = FakeDetector(
+            [RuntimeError("detector failed unexpectedly"), _found(41.3, -8.7, "7")]
         )
         metrics = FakeMetrics()
 
         with tempfile.TemporaryDirectory() as directory:
-            run_detection_batch(
-                dataframe,
-                Path(directory) / "failed.csv",
-                set(),
-                detector_instance=detector,
-                metrics=metrics,
-            )
+            with self.assertLogs("door_number_detector.core.batch", level="INFO") as logs:
+                output = run_detection_batch(
+                    _two_row_workbook(),
+                    Path(directory) / "failed.csv",
+                    set(),
+                    detector_instance=detector,
+                    metrics=metrics,
+                )
+            with output.open(newline="", encoding="utf-8-sig") as output_file:
+                rows = list(csv.DictReader(output_file, delimiter=";"))
 
-        self.assertEqual(metrics.records[0]["image_calls"], 5)
-        self.assertEqual(metrics.records[0]["metadata_calls"], 2)
+        self.assertEqual(
+            [(row["PREDICTION_FOUND"], row["MATCH"], row["OBSERVATION"]) for row in rows],
+            [("NO", "NO", "Detection failed"), ("YES", "YES", "")],
+        )
+        self.assertEqual(
+            [(record["success"], record["image_calls"]) for record in metrics.records],
+            [(False, 0), (True, 0)],
+        )
+        self.assertTrue(any("1 error(s)" in message for message in logs.output))
 
     def test_cancelled_detection_is_left_for_resume(self):
         cancelled = DetectionResult(
