@@ -7,6 +7,21 @@ class OcrParsingTests(unittest.TestCase):
     def test_extracts_numbers_and_letters(self):
         self.assertEqual(parse_ocr_text("Door 12A and 4"), ["12A", "4"])
 
+    def test_accepts_single_letter_suffix_after_space_or_hyphen(self):
+        for text in ("20 A", "20-A", "20A", "20 a"):
+            with self.subTest(text=text):
+                self.assertEqual(parse_ocr_text(text), ["20A"])
+
+    def test_does_not_take_a_letter_from_a_following_word(self):
+        self.assertEqual(parse_ocr_text("12 AV"), ["12"])
+        self.assertEqual(parse_ocr_text("3 RUA"), ["3"])
+        self.assertEqual(parse_ocr_text("LOTE 12 A"), ["LOTE12"])
+
+    def test_does_not_truncate_numbers_or_take_unicode_word_letters(self):
+        self.assertEqual(parse_ocr_text("12AV"), ["12"])
+        self.assertEqual(parse_ocr_text("7RUA"), ["7"])
+        self.assertEqual(parse_ocr_text("3 SÃO"), ["3"])
+
     def test_skips_leading_zero_and_blocklisted_fragments(self):
         self.assertEqual(parse_ocr_text("012 2024G 15"), ["15"])
 

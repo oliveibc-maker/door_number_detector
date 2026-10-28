@@ -7,7 +7,7 @@ KEYWORD_PATTERN = re.compile(
     r"\b(LOTE|LOT|SECTOR|SEC|BLOCO|BL|APARTAMENTO|APT|FRACCAO|FRACAO)\s*(\d{1,4})\b",
     re.IGNORECASE,
 )
-DOOR_NUMBER_PATTERN = re.compile(r"[A-Za-z]?\d{1,4}[A-Za-z]?")
+DOOR_NUMBER_PATTERN = re.compile(r"[A-Za-z]?\d{1,4}(?:[ -]?[A-Za-z](?![^\W\d_]))?")
 # Google's copyright, as OCR misreads it: "© 2023 Google", "2023Go0gle", "0-2023Gocqle".
 # Street View prints it in the bottom strip and sometimes inside the panorama itself,
 # so a whole OCR line that looks like it is dropped instead of being split into
@@ -44,6 +44,7 @@ def parse_ocr_text(text: str, log_info: Callable[[str], None] | None = None) -> 
 
     candidates = []
     for number in DOOR_NUMBER_PATTERN.findall(upper_text):
+        number = number.replace(" ", "").replace("-", "")
         if re.match(r"0\d", number):
             if log_info:
                 log_info(f"OCR: skipped leading-zero fragment '{number}'")
