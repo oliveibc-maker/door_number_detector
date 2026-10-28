@@ -7,7 +7,7 @@ KEYWORD_PATTERN = re.compile(
     r"\b(LOTE|LOT|SECTOR|SEC|BLOCO|BL|APARTAMENTO|APT|FRACCAO|FRACAO)\s*(\d{1,4})\b",
     re.IGNORECASE,
 )
-DOOR_NUMBER_PATTERN = re.compile(r"[A-Za-z]?\d{1,4}(?:[ -]?[A-Za-z])?(?![A-Za-z])")
+DOOR_NUMBER_PATTERN = re.compile(r"[A-Za-z]?\d{1,4}(?:[ -]?[A-Za-z](?![^\W\d_]))?")
 # Google's copyright, as OCR misreads it: "© 2023 Google", "2023Go0gle", "0-2023Gocqle".
 # Street View prints it in the bottom strip and sometimes inside the panorama itself,
 # so a whole OCR line that looks like it is dropped instead of being split into

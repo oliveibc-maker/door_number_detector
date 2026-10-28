@@ -17,6 +17,11 @@ class OcrParsingTests(unittest.TestCase):
         self.assertEqual(parse_ocr_text("3 RUA"), ["3"])
         self.assertEqual(parse_ocr_text("LOTE 12 A"), ["LOTE12"])
 
+    def test_does_not_truncate_numbers_or_take_unicode_word_letters(self):
+        self.assertEqual(parse_ocr_text("12AV"), ["12"])
+        self.assertEqual(parse_ocr_text("7RUA"), ["7"])
+        self.assertEqual(parse_ocr_text("3 SÃO"), ["3"])
+
     def test_skips_leading_zero_and_blocklisted_fragments(self):
         self.assertEqual(parse_ocr_text("012 2024G 15"), ["15"])
 
