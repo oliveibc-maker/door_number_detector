@@ -52,6 +52,14 @@ class CandidateSelectorTests(unittest.TestCase):
                     accepted(candidate(number, 90)),
                 )
 
+    def test_lettered_twenty_candidate_is_not_treated_as_suspicious(self):
+        lettered_number = candidate("20A", 90)
+
+        self.assertEqual(
+            self.selector.select([candidate("20", 99), lettered_number]),
+            accepted(lettered_number),
+        )
+
     def test_newly_suspicious_tiers_yield_to_clean_candidates(self):
         for number in ("2", "3001"):
             with self.subTest(number=number):
