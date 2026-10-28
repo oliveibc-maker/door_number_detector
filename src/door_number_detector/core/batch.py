@@ -40,7 +40,7 @@ _NO_IMAGERY_TOKEN = OUTCOME_DETAILS[DetectionOutcome.NO_IMAGERY].csv_prediction_
 
 
 def _normalize(value: str) -> str:
-    return re.sub(r"\s+", "", value.strip().upper())
+    return re.sub(r"[\s-]+", "", value.strip().upper())
 
 
 def _init_output_csv(output_path: Path) -> None:

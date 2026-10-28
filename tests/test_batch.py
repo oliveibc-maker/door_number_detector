@@ -67,6 +67,33 @@ class FakeMetrics:
 
 
 class BatchTests(unittest.TestCase):
+    def test_matches_number_with_space_or_hyphen_before_letter(self):
+        dataframe = pd.DataFrame(
+            [
+                {"NOME_COMPLETO_PORTA": "20 A", "LATITUDE": 41.2, "LONGITUDE": -8.6},
+                {"NOME_COMPLETO_PORTA": "7-A", "LATITUDE": 41.3, "LONGITUDE": -8.7},
+            ]
+        )
+        detector = FakeDetector(
+            [
+                _found(41.2, -8.6, "20A"),
+                _found(41.3, -8.7, "7A"),
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result_path = run_detection_batch(
+                dataframe,
+                Path(directory) / "run.csv",
+                set(),
+                detector_instance=detector,
+                metrics=FakeMetrics(),
+            )
+            with result_path.open(newline="", encoding="utf-8-sig") as output_file:
+                rows = list(csv.DictReader(output_file, delimiter=";"))
+
+        self.assertEqual([row["MATCH"] for row in rows], ["YES", "YES"])
+
     def test_excel_loader_rejects_empty_and_missing_columns(self):
         dataframes = (
             pd.DataFrame(columns=["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]),
