@@ -3,9 +3,11 @@
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
-from door_number_detector.core.google_street_view import NoImageryAvailable
+from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
+from door_number_detector.core.google_street_view import CameraPosition
 
 DEFAULT_FOV_SWEEP: list[tuple[int, list[int], list[int]]] = [
     (10, [0, -5, 5, -10, 10, -15, 15, -20, 20, -25, 25, -30, 30], [0, -5, 5, -10, 10, -15, 15]),
@@ -17,21 +19,20 @@ class StreetViewSweep:
         self,
         street_view,
         ocr_service,
-        confidence_check: Callable[[list[dict]], bool],
+        candidate_selector: CandidateSelector,
         *,
         debug: bool = False,
         logger: logging.Logger | None = None,
     ):
         self.street_view = street_view
         self.ocr_service = ocr_service
-        self.confidence_check = confidence_check
+        self.candidate_selector = candidate_selector
         self.debug = debug
         self.logger = logger or logging.getLogger(__name__)
 
     def fetch_candidates(
         self,
-        latitude: float,
-        longitude: float,
+        camera: CameraPosition,
         heading,
         pass_label: str = "center",
         pitch_override: int | None = None,
@@ -39,11 +40,10 @@ class StreetViewSweep:
         cancel_event: threading.Event | None = None,
         debug_directory: Path | None = None,
         save_debug_image: Callable | None = None,
-    ) -> list[dict]:
+    ) -> list[Candidate]:
         fov_sweep = sweep if sweep is not None else DEFAULT_FOV_SWEEP
-        candidates: list[dict] = []
+        candidates: list[Candidate] = []
         done = False
-        no_imagery = False
 
         for fov, heading_offsets, pitch_values in fov_sweep:
             if done:
@@ -78,26 +78,12 @@ class StreetViewSweep:
                         offset,
                         pitch,
                     )
-                    try:
-                        image = self.street_view.get_image(
-                            latitude,
-                            longitude,
-                            heading=heading,
-                            heading_offset=offset,
-                            pitch=pitch,
-                            fov=fov,
-                        )
-                    except NoImageryAvailable:
-                        self.logger.warning(
-                            "[%s] No Street View imagery for (%s, %s) — aborting sweep.",
-                            pass_label,
-                            latitude,
-                            longitude,
-                        )
-                        no_imagery = True
-                        done = True
-                        break
-
+                    image = self.street_view.get_image(
+                        camera,
+                        heading=(heading + offset) % 360,
+                        pitch=pitch,
+                        fov=fov,
+                    )
                     if image is None:
                         self.logger.warning(
                             "[%s] No image returned for offset=%s pitch=%s",
@@ -113,27 +99,31 @@ class StreetViewSweep:
                         image_name = f"fov{fov}_offset{offset}_pitch{pitch}.png"
                         save_debug_image(image, image_name, directory=pass_directory)
 
-                    number, confidence = self.ocr_service.extract_door_number(image)
-                    self.logger.info(
-                        "[%s] FOV=%s offset=%s pitch=%s -> '%s' (confidence: %s%%)",
-                        pass_label,
-                        fov,
-                        offset,
-                        pitch,
-                        number,
-                        confidence,
-                    )
-                    candidates.append(
-                        {
-                            "number": number,
-                            "confidence": confidence,
-                            "heading": offset,
-                            "pitch": pitch,
-                            "fov": fov,
-                        }
-                    )
+                    image_candidates = self.ocr_service.extract_door_number(image)
+                    if image_candidates:
+                        candidates.extend(
+                            replace(
+                                candidate,
+                                heading_offset=offset,
+                                pitch=pitch,
+                                fov=fov,
+                            )
+                            for candidate in image_candidates
+                        )
+                    else:
+                        candidates.append(Candidate("", 0, offset, pitch, fov))
+                    for candidate in image_candidates:
+                        self.logger.info(
+                            "[%s] FOV=%s offset=%s pitch=%s -> '%s' (confidence: %s%%)",
+                            pass_label,
+                            fov,
+                            offset,
+                            pitch,
+                            candidate.number,
+                            candidate.confidence,
+                        )
 
-                    if self.confidence_check(candidates):
+                    if self.candidate_selector.should_stop(candidates):
                         self.logger.info(
                             "[%s] Confident result at FOV=%s offset=%s pitch=%s — stopping sweep.",
                             pass_label,
@@ -144,8 +134,4 @@ class StreetViewSweep:
                         done = True
                         break
 
-        if no_imagery:
-            raise NoImageryAvailable(
-                f"No Street View imagery available for ({latitude}, {longitude})"
-            )
         return candidates

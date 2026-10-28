@@ -1,7 +1,17 @@
 import unittest
 from datetime import datetime
 
-from door_number_detector.core.models import DetectionResult
+from door_number_detector.core.models import DetectionOutcome, DetectionResult
+from door_number_detector.core.outcomes import OUTCOME_DETAILS
+
+
+class OutcomeObservationTests(unittest.TestCase):
+    def test_observations_avoid_the_csv_delimiter_and_quotes(self):
+        # The offline results viewer splits rows on ';' without handling quoting.
+        for outcome, details in OUTCOME_DETAILS.items():
+            with self.subTest(outcome=outcome):
+                self.assertNotIn(";", details.observation)
+                self.assertNotIn('"', details.observation)
 
 
 class DetectionResultTests(unittest.TestCase):
@@ -21,6 +31,7 @@ class DetectionResultTests(unittest.TestCase):
             set(serialized),
             {
                 "success",
+                "outcome",
                 "latitude",
                 "longitude",
                 "door_number",
@@ -30,21 +41,28 @@ class DetectionResultTests(unittest.TestCase):
                 "observation",
                 "timestamp",
                 "error",
+                "image_calls",
+                "metadata_calls",
             },
         )
         self.assertEqual(serialized["door_number"], "12A")
+        self.assertEqual(serialized["outcome"], DetectionOutcome.FOUND)
+        self.assertEqual(serialized["image_calls"], 0)
+        self.assertEqual(serialized["metadata_calls"], 0)
         self.assertIsNone(serialized["error"])
         self.assertIsInstance(datetime.fromisoformat(serialized["timestamp"]), datetime)
 
     def test_failure_and_no_imagery_can_be_distinguished(self):
         no_imagery = DetectionResult(
             success=False,
+            outcome=DetectionOutcome.NO_IMAGERY,
             latitude=41.2,
             longitude=-8.6,
             observation="No Street View imagery available",
         )
         failed = DetectionResult(
             success=False,
+            outcome=DetectionOutcome.IMAGE_UNAVAILABLE,
             latitude=41.2,
             longitude=-8.6,
             error="Image unavailable",
@@ -52,6 +70,25 @@ class DetectionResultTests(unittest.TestCase):
 
         self.assertEqual(no_imagery.to_dict()["observation"], "No Street View imagery available")
         self.assertEqual(failed.to_dict()["error"], "Image unavailable")
+        self.assertEqual(no_imagery.outcome, DetectionOutcome.NO_IMAGERY)
+        self.assertEqual(failed.outcome, DetectionOutcome.IMAGE_UNAVAILABLE)
+
+    def test_success_must_agree_with_explicit_outcome(self):
+        with self.assertRaises(ValueError):
+            DetectionResult(
+                success=False,
+                outcome=DetectionOutcome.FOUND,
+                latitude=41.2,
+                longitude=-8.6,
+            )
+
+        with self.assertRaises(ValueError):
+            DetectionResult(
+                success=True,
+                outcome=DetectionOutcome.LOW_CONFIDENCE,
+                latitude=41.2,
+                longitude=-8.6,
+            )
 
 
 if __name__ == "__main__":

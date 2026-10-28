@@ -1,5 +1,6 @@
 import base64
 import importlib
+import io
 import json
 import socket
 import sys
@@ -10,6 +11,8 @@ import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from unittest.mock import patch
+
+import pandas as pd
 
 from door_number_detector.core.models import DetectionResult
 
@@ -36,6 +39,8 @@ def _load_app_with_stubs():
     metrics_module.RunMetrics = Metrics
     batch_module.run_detection_batch = lambda *args, **kwargs: None
     batch_module.run_excel_batch = lambda *args, **kwargs: None
+    batch_module.run_sqlserver_batch = lambda *args, **kwargs: None
+    batch_module.InvalidExcelWorkbookError = type("InvalidExcelWorkbookError", (ValueError,), {})
     sources_module.FILTER_COLUMNS = {
         "localidade": "NOME_LOCALIDADE",
         "freguesia": "NOME_FREGUESIA",
@@ -45,6 +50,7 @@ def _load_app_with_stubs():
     sources_module.SourceFilter = str
     sources_module.query_sqlserver = lambda *args, **kwargs: None
     sources_module.read_excel_any = lambda path: Workbook()
+    batch_module.load_excel_dataframe = lambda path: sources_module.read_excel_any(path)
 
     with patch.dict(
         sys.modules,
@@ -164,7 +170,13 @@ class WebHandlerTests(unittest.TestCase):
             heading=10,
             pitch=0,
         )
-        self.app._detector.detect_door_number = lambda *args, **kwargs: typed_result
+        calls = []
+
+        def analyze(*args, **kwargs):
+            calls.append((args, kwargs))
+            return typed_result
+
+        self.app._detector.detect_door_number = analyze
         status, body = self._request(
             "POST",
             "/api/analyze",
@@ -178,9 +190,11 @@ class WebHandlerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         payload = json.loads(body)
         self.assertEqual(payload["door_number"], "12A")
+        self.assertEqual(payload["outcome"], "found")
         self.assertIn("observation", payload)
         self.assertIn("timestamp", payload)
         self.assertIsNone(payload["error"])
+        self.assertIsNone(calls[0][0][2])
 
     def test_detector_factory_is_lazy_and_constructs_once(self):
         self.assertIsNone(self.original_detector)
@@ -275,22 +289,82 @@ class WebHandlerTests(unittest.TestCase):
         self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
         self.assertFalse(self.app._state["running"])
 
-        invalid_workbook = types.SimpleNamespace(empty=True, columns=set())
-        with patch.object(self.app, "read_excel_any", return_value=invalid_workbook):
+        with patch.object(
+            self.app,
+            "load_excel_dataframe",
+            side_effect=self.app.InvalidExcelWorkbookError("invalid"),
+        ):
             status, _ = self._request("POST", "/api/upload?filename=empty.xlsx", b"data", headers)
         self.assertEqual(status, 400)
         self.assertFalse(self.app._state["running"])
         self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
+
+    def test_upload_rejects_invalid_workbook_and_removes_it(self):
+        with patch.object(
+            self.app,
+            "load_excel_dataframe",
+            side_effect=self.app.InvalidExcelWorkbookError(
+                "The spreadsheet is empty or missing required columns."
+            ),
+        ):
+            status, body = self._request(
+                "POST",
+                "/api/upload?filename=doors.xlsx",
+                b"data",
+                {"X-CSRF-Token": "test-csrf-token"},
+            )
+
+        self.assertEqual(status, 400)
+        self.assertIn(b"missing required columns", body)
+        self.assertEqual(list(Path(self.upload_dir.name).iterdir()), [])
+
+    def test_sql_worker_updates_total_from_shared_batch_runner(self):
+        cancel_event = self.app._claim_job(total=0)
+        self.assertIsNotNone(cancel_event)
+
+        def run_shared_batch(*args, on_rows_loaded, **kwargs):
+            on_rows_loaded(3)
+
+        with patch.object(self.app, "run_sqlserver_batch", side_effect=run_shared_batch):
+            self.app._run_sqlserver_batch(
+                "rua",
+                "123",
+                Path(self.upload_dir.name) / "sql.csv",
+                cancel_event,
+                self.app.RunMetrics(),
+            )
+
+        self.assertEqual(self.app._state["total"], 3)
+        self.assertFalse(self.app._state["running"])
+
+    def test_unexpected_sql_worker_start_failure_releases_the_job(self):
+        with patch.object(self.app, "_start_worker", side_effect=ValueError("boom")):
+            status, body = self._request(
+                "POST",
+                "/api/run_sqlserver",
+                b"filter_by=rua&filter_value=123",
+                {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-CSRF-Token": "test-csrf-token",
+                },
+            )
+
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"boom", body)
+        self.assertFalse(self.app._state["running"])
+        self.assertIsNone(self.app._state["error"])
 
     def test_valid_upload_uses_generated_path_outside_project_root(self):
         worker_started = threading.Event()
         release_worker = threading.Event()
         worker_finished = threading.Event()
         uploaded_paths = []
+        parsed_workbooks = []
         original_finish = self.app._finish_job
 
         def hold_worker(path, *args, **kwargs):
             uploaded_paths.append(Path(path))
+            parsed_workbooks.append(kwargs.get("dataframe"))
             worker_started.set()
             release_worker.wait(10)
 
@@ -300,6 +374,9 @@ class WebHandlerTests(unittest.TestCase):
 
         try:
             with (
+                patch.object(
+                    self.app, "load_excel_dataframe", wraps=self.app.load_excel_dataframe
+                ) as load_workbook,
                 patch.object(self.app, "run_excel_batch", side_effect=hold_worker),
                 patch.object(self.app, "_finish_job", side_effect=signal_finish),
             ):
@@ -315,6 +392,8 @@ class WebHandlerTests(unittest.TestCase):
                 self.assertEqual(uploaded_path.parent, Path(self.upload_dir.name))
                 self.assertRegex(uploaded_path.stem, r"^[0-9a-f]{32}$")
                 self.assertTrue(uploaded_path.exists())
+                load_workbook.assert_called_once_with(uploaded_path)
+                self.assertIsNotNone(parsed_workbooks[0])
                 self.assertFalse(self.app._state["worker"].daemon)
 
                 status, _ = self._request(
@@ -347,7 +426,7 @@ class WebHandlerTests(unittest.TestCase):
         release_parse = threading.Event()
         parse_count = 0
         results = []
-        original_reader = self.app.read_excel_any
+        original_reader = self.app.load_excel_dataframe
 
         def blocking_reader(path):
             nonlocal parse_count
@@ -369,7 +448,7 @@ class WebHandlerTests(unittest.TestCase):
 
         first_upload = threading.Thread(target=upload)
         try:
-            with patch.object(self.app, "read_excel_any", side_effect=blocking_reader):
+            with patch.object(self.app, "load_excel_dataframe", side_effect=blocking_reader):
                 first_upload.start()
                 self.assertTrue(parse_started.wait(2))
                 status, _ = self._request(
@@ -429,6 +508,170 @@ class WebHandlerTests(unittest.TestCase):
         winners = [claim for claim in claims if claim is not None]
         self.assertEqual(len(winners), 1)
         self.app._finish_job(winners[0])
+
+
+def _load_real_app():
+    with patch.dict(sys.modules):
+        return importlib.import_module("door_number_detector.web.app")
+
+
+def _workbook_bytes(rows, columns):
+    buffer = io.BytesIO()
+    pd.DataFrame(rows, columns=columns).to_excel(buffer, index=False, engine="openpyxl")
+    return buffer.getvalue()
+
+
+VALID_COLUMNS = ["NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"]
+VALID_ROWS = [["12A", 41.2, -8.6]]
+
+
+class _FakeDetector:
+    def detect_door_number(self, latitude, longitude, cancel_event=None):
+        return DetectionResult(
+            success=True,
+            latitude=latitude,
+            longitude=longitude,
+            door_number="12A",
+            confidence=91,
+        )
+
+
+class WebUploadWorkflowTests(unittest.TestCase):
+    """Upload endpoint with the real batch code, workbook reader, and a fake detector."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = _load_real_app()
+        cls.auth = "Basic " + base64.b64encode(b"tester:secret").decode("ascii")
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        root = Path(self.directory.name)
+        self.upload_dir = root / "uploads"
+        self.output_dir = root / "outputs"
+        self.originals = (self.app.UPLOAD_DIR, self.app.OUTPUT_DIR, dict(self.app._state))
+        self.app.UPLOAD_DIR = self.upload_dir
+        self.app.OUTPUT_DIR = self.output_dir
+        self.app._state.update(
+            {"running": False, "error": None, "cancel_event": None, "worker": None}
+        )
+        handler = type(
+            "UploadWorkflowRequestHandler",
+            (self.app.DoorNumberRequestHandler,),
+            {
+                "auth_username": "tester",
+                "auth_password": "secret",
+                "csrf_token": "test-csrf-token",
+                "max_upload_bytes": 1024 * 1024,
+            },
+        )
+        self.server = self.app.DoorNumberHTTPServer(("127.0.0.1", 0), handler)
+        self.server_thread = threading.Thread(target=self.server.serve_forever)
+        self.server_thread.start()
+        self.batch_finished = threading.Event()
+        original_finish = self.app._finish_job
+
+        def signal_finish(cancel_event, error=None):
+            original_finish(cancel_event, error)
+            self.batch_finished.set()
+
+        self.finish_patch = patch.object(self.app, "_finish_job", side_effect=signal_finish)
+        self.finish_patch.start()
+
+    def tearDown(self):
+        self.finish_patch.stop()
+        self.server.shutdown()
+        self.server.server_close()
+        self.server_thread.join()
+        self.app.UPLOAD_DIR, self.app.OUTPUT_DIR, state = self.originals
+        self.app._state.clear()
+        self.app._state.update(state)
+        self.directory.cleanup()
+
+    def _upload(self, data):
+        connection = HTTPConnection("127.0.0.1", self.server.server_port)
+        connection.request(
+            "POST",
+            "/api/upload?filename=doors.xlsx",
+            body=data,
+            headers={"Authorization": self.auth, "X-CSRF-Token": "test-csrf-token"},
+        )
+        response = connection.getresponse()
+        result = response.status, response.read()
+        connection.close()
+        return result
+
+    def _uploaded_files(self):
+        return list(self.upload_dir.iterdir()) if self.upload_dir.exists() else []
+
+    def test_real_invalid_workbooks_are_rejected_and_removed(self):
+        workbooks = {
+            "missing latitude": _workbook_bytes(
+                [["12A", -8.6]], ["NOME_COMPLETO_PORTA", "LONGITUDE"]
+            ),
+            "empty": _workbook_bytes([], VALID_COLUMNS),
+        }
+        for name, data in workbooks.items():
+            with self.subTest(workbook=name):
+                status, body = self._upload(data)
+
+                self.assertEqual(status, 400)
+                self.assertIn(b"missing required columns", body)
+                self.assertEqual(self._uploaded_files(), [])
+                self.assertFalse(self.app._state["running"])
+
+    def test_upload_is_deleted_after_a_successful_batch(self):
+        with patch.object(self.app, "get_detector", return_value=_FakeDetector()):
+            status, body = self._upload(_workbook_bytes(VALID_ROWS, VALID_COLUMNS))
+            self.assertEqual(status, 200)
+            self.assertTrue(self.batch_finished.wait(10))
+
+        csv_path = self.output_dir / json.loads(body)["csv"]
+        self.assertTrue(csv_path.exists())
+        self.assertEqual(self._uploaded_files(), [])
+        self.assertIsNone(self.app._state["error"])
+
+    def test_upload_is_deleted_after_a_failed_batch(self):
+        with patch.object(self.app, "get_detector", side_effect=RuntimeError("detector down")):
+            status, _ = self._upload(_workbook_bytes(VALID_ROWS, VALID_COLUMNS))
+            self.assertEqual(status, 200)
+            self.assertTrue(self.batch_finished.wait(10))
+
+        self.assertEqual(self._uploaded_files(), [])
+        self.assertEqual(self.app._state["error"], "detector down")
+        self.assertFalse(self.app._state["running"])
+
+    def test_workbook_is_parsed_once_from_upload_to_batch_completion(self):
+        with (
+            patch("pandas.read_excel", wraps=pd.read_excel) as read_excel,
+            patch.object(self.app, "get_detector", return_value=_FakeDetector()),
+        ):
+            status, _ = self._upload(_workbook_bytes(VALID_ROWS, VALID_COLUMNS))
+            self.assertEqual(status, 200)
+            self.assertTrue(self.batch_finished.wait(10))
+
+        self.assertEqual(read_excel.call_count, 1)
+
+    def test_unexpected_worker_start_failure_releases_the_job_and_upload(self):
+        with patch.object(self.app, "_start_worker", side_effect=ValueError("boom")):
+            status, body = self._upload(_workbook_bytes(VALID_ROWS, VALID_COLUMNS))
+
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"boom", body)
+        self.assertFalse(self.app._state["running"])
+        self.assertEqual(self._uploaded_files(), [])
+
+    def test_output_directory_failure_removes_the_upload_without_leaking_paths(self):
+        def fail_mkdir(*args, **kwargs):
+            raise OSError("/private/internal/outputs unavailable")
+
+        self.app.OUTPUT_DIR = types.SimpleNamespace(mkdir=fail_mkdir)
+        status, body = self._upload(_workbook_bytes(VALID_ROWS, VALID_COLUMNS))
+
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"/private", body)
+        self.assertEqual(self._uploaded_files(), [])
+        self.assertFalse(self.app._state["running"])
 
 
 if __name__ == "__main__":

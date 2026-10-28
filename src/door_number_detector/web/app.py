@@ -6,7 +6,6 @@ import logging
 import math
 import re
 import secrets
-import signal
 import socket
 import threading
 from datetime import datetime
@@ -15,17 +14,20 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
-from door_number_detector.core.batch import run_detection_batch, run_excel_batch
+from door_number_detector.core.batch import (
+    InvalidExcelWorkbookError,
+    load_excel_dataframe,
+    run_excel_batch,
+    run_sqlserver_batch,
+)
 from door_number_detector.core.config import Config
 from door_number_detector.core.metrics import RunMetrics
 from door_number_detector.core.redaction import redact_api_key
 from door_number_detector.core.sources import (
     FILTER_COLUMNS,
     SourceFilter,
-    query_sqlserver,
-    read_excel_any,
 )
-from door_number_detector.logging_config import configure_logging
+from door_number_detector.runtime import shutdown_process, start_process
 from door_number_detector.web.security import (
     UploadTooLarge,
     is_loopback_host,
@@ -139,7 +141,11 @@ def _remove_uploaded_workbook(excel_path: Path) -> None:
 
 
 def _run_batch(
-    excel_path: Path, csv_path: Path, cancel_event: threading.Event, metrics: RunMetrics
+    excel_path: Path,
+    csv_path: Path,
+    cancel_event: threading.Event,
+    metrics: RunMetrics,
+    dataframe: Any,
 ) -> None:
     _logger.info(f"[batch] Excel batch starting — {excel_path.name}")
     error = None
@@ -150,6 +156,7 @@ def _run_batch(
             detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
+            dataframe=dataframe,
         )
     except Exception as exc:
         _logger.exception(f"[batch] Excel batch failed: {exc}")
@@ -171,19 +178,21 @@ def _run_sqlserver_batch(
 ) -> None:
     _logger.info(f"[batch] SQL batch starting — {filter_by}={filter_value!r}")
     error = None
-    try:
-        config = Config()
-        df = query_sqlserver(cast(SourceFilter, filter_by), filter_value, config)
+
+    def set_total(total: int) -> None:
         with _state_lock:
             if _state.get("cancel_event") is cancel_event:
-                _state["total"] = len(df)
-        run_detection_batch(
-            df,
+                _state["total"] = total
+
+    try:
+        run_sqlserver_batch(
+            cast(SourceFilter, filter_by),
+            filter_value,
             csv_path,
-            set(),
-            detector_instance=get_detector(),
             cancel_event=cancel_event,
             metrics=metrics,
+            on_rows_loaded=set_total,
+            detector_factory=get_detector,
         )
     except Exception as exc:
         _logger.exception(f"[batch] SQL batch failed: {exc}")
@@ -373,15 +382,12 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
                 with excel_path.open("xb") as uploaded_file:
                     uploaded_file.write(data)
-                workbook = read_excel_any(excel_path)
-                required_columns = {"NOME_COMPLETO_PORTA", "LATITUDE", "LONGITUDE"}
-                if workbook.empty or not required_columns.issubset(workbook.columns):
-                    _finish_job(cancel_event)
-                    _remove_uploaded_workbook(excel_path)
-                    self._send_json(
-                        400, {"error": "The spreadsheet is empty or missing required columns."}
-                    )
-                    return
+                workbook = load_excel_dataframe(excel_path)
+            except InvalidExcelWorkbookError as exc:
+                _finish_job(cancel_event)
+                _remove_uploaded_workbook(excel_path)
+                self._send_json(400, {"error": str(exc)})
+                return
             except Exception as exc:
                 _finish_job(cancel_event)
                 _remove_uploaded_workbook(excel_path)
@@ -394,7 +400,6 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             _logger.info("[upload] Accepted %s bytes as %s", len(data), excel_path.name)
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            csv_path = OUTPUT_DIR / f"predictions_{ts}.csv"
             if cancel_event.is_set():
                 _finish_job(cancel_event)
                 _remove_uploaded_workbook(excel_path)
@@ -402,6 +407,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 return
             try:
                 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                csv_path = OUTPUT_DIR / f"predictions_{ts}.csv"
                 metrics = RunMetrics()
             except Exception as exc:
                 _finish_job(cancel_event)
@@ -417,7 +423,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             try:
                 _start_worker(
                     _run_batch,
-                    (excel_path, csv_path, cancel_event, metrics),
+                    (excel_path, csv_path, cancel_event, metrics, workbook),
                     cancel_event,
                 )
             except Exception as exc:
@@ -465,8 +471,9 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                     (filter_by, filter_value, csv_path, cancel_event, metrics),
                     cancel_event,
                 )
-            except RuntimeError as exc:
-                _finish_job(cancel_event, str(exc))
+            except Exception as exc:
+                _finish_job(cancel_event)
+                _logger.warning("[sql] Could not start batch worker (%s).", type(exc).__name__)
                 self._send_json(500, {"error": "Could not start the batch worker."})
                 return
 
@@ -485,7 +492,8 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             try:
                 lat = float(form_data.get("latitude", [""])[0])
                 lon = float(form_data.get("longitude", [""])[0])
-                hdg = int(form_data.get("heading", ["0"])[0] or 0)
+                heading_value = form_data.get("heading", [None])[0]
+                hdg = int(heading_value) if heading_value else None
                 pit = int(form_data.get("pitch", ["0"])[0] or 0)
             except ValueError:
                 self._send_json(400, {"error": "Coordinates and camera angles must be numeric."})
@@ -495,7 +503,7 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
                 or not math.isfinite(lon)
                 or not -90 <= lat <= 90
                 or not -180 <= lon <= 180
-                or not 0 <= hdg <= 359
+                or (hdg is not None and not 0 <= hdg <= 359)
                 or not -90 <= pit <= 90
             ):
                 self._send_json(
@@ -506,16 +514,20 @@ class DoorNumberRequestHandler(BaseHTTPRequestHandler):
             if cancel_event is None:
                 self._send_json(409, {"error": "Pipeline already running."})
                 return
+            # Release the job before responding, so a client that gets the response
+            # can start the next job straight away.
+            result = None
             try:
                 result = get_detector().detect_door_number(
                     lat, lon, hdg, pit, cancel_event=cancel_event
                 )
             except Exception:
                 _logger.exception("Single-coordinate analysis failed.")
-                self._send_json(500, {"error": "Detection failed."})
-                return
             finally:
                 _finish_job(cancel_event)
+            if result is None:
+                self._send_json(500, {"error": "Detection failed."})
+                return
             self._send_json(200, result.to_dict())
 
         else:
@@ -593,45 +605,38 @@ def create_server(host=None, port=None):
     return server_class((host, port), handler)
 
 
-def _handle_sigterm(_signum, _frame):
-    raise KeyboardInterrupt
+def _cancel_active_job_and_get_worker():
+    """Set the running batch's cancel event and return its worker, if any."""
+    with _state_lock:
+        cancel_event = _state.get("cancel_event")
+        if cancel_event is not None:
+            cancel_event.set()
+        return _state.get("worker")
+
+
+def _close_detector():
+    if _detector is not None:
+        _detector.close()
 
 
 def main():
-    # Paddle installs a fatal SIGTERM handler on import; load it before ours so ours wins.
-    import paddle  # noqa: F401
-
-    configure_logging()
-    signal.signal(signal.SIGTERM, _handle_sigterm)
+    start_process()
     server = create_server()
-    removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
-    if removed_uploads:
-        _logger.info("Removed %s abandoned uploaded workbook(s).", removed_uploads)
-    _logger.info("=" * 50)
-    _logger.info("Door Number Detector — Web Server")
-    _logger.info("=" * 50)
-    _logger.info("Local:    http://127.0.0.1:%s", server.server_address[1])
-    _logger.info("=" * 50)
-    _logger.info("Press Ctrl+C to stop.")
     try:
+        removed_uploads = remove_orphaned_uploads(UPLOAD_DIR)
+        if removed_uploads:
+            _logger.info("Removed %s abandoned uploaded workbook(s).", removed_uploads)
+        _logger.info("=" * 50)
+        _logger.info("Door Number Detector — Web Server")
+        _logger.info("=" * 50)
+        _logger.info("Local:    http://127.0.0.1:%s", server.server_address[1])
+        _logger.info("=" * 50)
+        _logger.info("Press Ctrl+C to stop.")
         server.serve_forever()
     except KeyboardInterrupt:
         _logger.info("Web server stop requested.")
     finally:
-        with _state_lock:
-            cancel_event = _state.get("cancel_event")
-            if cancel_event is not None:
-                cancel_event.set()
-        server.server_close()
-        with _state_lock:
-            cancel_event = _state.get("cancel_event")
-            worker = _state.get("worker")
-            if cancel_event is not None:
-                cancel_event.set()
-        if worker is not None and worker is not threading.current_thread():
-            worker.join()
-        if _detector is not None:
-            _detector.close()
+        shutdown_process(server, _cancel_active_job_and_get_worker, _close_detector)
 
 
 if __name__ == "__main__":

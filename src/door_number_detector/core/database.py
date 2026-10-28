@@ -7,6 +7,9 @@ from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_en
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
+from door_number_detector.core.models import DetectionOutcome
+from door_number_detector.core.outcomes import OUTCOME_DETAILS
+
 logger = logging.getLogger(__name__)
 
 
@@ -110,6 +113,13 @@ class DatabaseManager:
 
     def save_result(self, result):
         """Persist a detection result."""
+        outcome = result.get("outcome")
+        if outcome is None:
+            outcome = DetectionOutcome.FOUND if result["success"] else DetectionOutcome.FAILED
+        details = OUTCOME_DETAILS[outcome]
+        if not details.persist:
+            return
+
         session = self.Session()
         try:
             detection = DoorDetectionResult(
@@ -120,8 +130,8 @@ class DatabaseManager:
                 heading=result.get("heading"),
                 pitch=result.get("pitch"),
                 timestamp=datetime.now(),
-                status="success" if result["success"] else "error",
-                error_message=result.get("error"),
+                status=details.database_status,
+                error_message=details.database_message,
             )
 
             session.add(detection)

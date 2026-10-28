@@ -1,21 +1,20 @@
 """Main door number detection workflow."""
 
 import logging
-import re
 import threading
-from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
 from door_number_detector.core.config import Config
 from door_number_detector.core.database import DatabaseManager
 from door_number_detector.core.google_street_view import NoImageryAvailable, StreetViewFetcher
-from door_number_detector.core.models import DetectionResult
+from door_number_detector.core.models import DetectionOutcome, DetectionResult
 from door_number_detector.core.ocr import DoorNumberOCR
-from door_number_detector.core.parsing import BLOCKLIST
+from door_number_detector.core.outcomes import OUTCOME_DETAILS
 from door_number_detector.core.redaction import redact_api_key
 from door_number_detector.core.sweep import StreetViewSweep
 
@@ -56,10 +55,11 @@ class DoorNumberDetector:
         )
 
         self.ocr = DoorNumberOCR(reader=ocr_engine, logger=logger)
+        self.candidate_selector = CandidateSelector(self.config.confidence_threshold, logger)
         self.sweep = StreetViewSweep(
             self.street_view,
             self.ocr,
-            self._has_confident_result,
+            self.candidate_selector,
             debug=self.config.debug,
             logger=logger,
         )
@@ -74,58 +74,46 @@ class DoorNumberDetector:
             image.save(path)
         return path
 
-    @staticmethod
-    def _is_year_like(num: str) -> bool:
-        return bool(
-            re.fullmatch(r"202", num)
-            or re.fullmatch(r"20\d{2}", num)
-            or re.fullmatch(r"19\d{2}", num)
-        )
+    def _usage_since(self, before: tuple[int, int], enabled: bool) -> tuple[int, int]:
+        if not enabled:
+            return 0, 0
+        after = self.street_view.get_call_counts()
+        return after[0] - before[0], after[1] - before[1]
 
     @staticmethod
-    def _is_suspicious_short(num: str) -> bool:
-        """True if the candidate is a short fragment likely from a year watermark.
-
-        Covers:
-          - Two-digit year fragments: 20 (prefix), 21–26 (recent year suffixes)
-          - e.g. '20', '24', '25', '23', '22', '21', '26'
-        """
-        if re.fullmatch(r"2[0-6]", num):
-            return True
-        return False
-
-    def _is_bad_candidate(self, num: str) -> bool:
-        return self._is_year_like(num) or self._is_suspicious_short(num)
-
-    def _no_early_stop_number(self, num: str) -> bool:
-        if num in ("20", "2", "24", "25", "202"):
-            return True
-        if re.fullmatch(r"20\d{2}", num):
-            return True
-        if re.fullmatch(r"30\d{2}", num):
-            return True
-        return False
-
-    def _has_confident_result(self, candidates: list[dict]) -> bool:
-        if not candidates:
-            return False
-        best = max(
-            candidates,
-            key=lambda c: (c["confidence"], len(c["number"]) if c["number"] else 0),
+    def _unsuccessful_result(
+        outcome: DetectionOutcome, latitude, longitude, usage: tuple[int, int]
+    ) -> DetectionResult:
+        details = OUTCOME_DETAILS[outcome]
+        return DetectionResult(
+            success=False,
+            outcome=outcome,
+            latitude=latitude,
+            longitude=longitude,
+            observation=details.observation,
+            error=details.database_message,
+            image_calls=usage[0],
+            metadata_calls=usage[1],
         )
-        if not (best["number"] and best["confidence"] >= self.config.confidence_threshold):
-            return False
 
-        best_number = best["number"]
-
-        if self._no_early_stop_number(best_number):
-            logger.info(
-                f"Early stop suppressed for '{best_number}' "
-                f"(matches no-early-stop pattern) — continuing sweep."
+    def _finish_result(self, result: DetectionResult) -> DetectionResult:
+        """Save the result when its outcome is persisted; a failed save becomes FAILED."""
+        assert result.outcome is not None
+        if not OUTCOME_DETAILS[result.outcome].persist:
+            return result
+        try:
+            self.db.save_result(result.to_dict())
+        except Exception:
+            logger.error("Could not save detection result", exc_info=True)
+            if result.outcome is DetectionOutcome.FAILED:
+                return result
+            return self._unsuccessful_result(
+                DetectionOutcome.FAILED,
+                result.latitude,
+                result.longitude,
+                (result.image_calls, result.metadata_calls),
             )
-            return False
-
-        return True
+        return result
 
     def detect_door_number(
         self,
@@ -138,6 +126,8 @@ class DoorNumberDetector:
     ) -> DetectionResult:
         """Detect the door number for a specific coordinate."""
         logger.info(f"Processing coordinate: {latitude}, {longitude}")
+        track_usage = image is None
+        usage_before = self.street_view.get_call_counts() if track_usage else (0, 0)
 
         try:
             if self.config.debug:
@@ -145,52 +135,37 @@ class DoorNumberDetector:
                 self.current_debug_house_dir = self.debug_dir / house_name
                 self.current_debug_house_dir.mkdir(parents=True, exist_ok=True)
 
-            all_image_candidates: list[dict] = []
+            all_image_candidates: list[Candidate] = []
 
             if image is not None:
                 logger.info("Using supplied image instead of fetching from Street View")
-                number, confidence = self.ocr.extract_door_number(image)
-                logger.info(f"Supplied image -> '{number}' (confidence: {confidence}%)")
-                all_image_candidates.append(
-                    {
-                        "number": number,
-                        "confidence": confidence,
-                        "heading": heading,
-                        "pitch": pitch,
-                    }
-                )
+                all_image_candidates = self.ocr.extract_door_number(image)
+                if all_image_candidates:
+                    all_image_candidates = [
+                        Candidate(candidate.number, candidate.confidence, heading, pitch)
+                        for candidate in all_image_candidates
+                    ]
+                else:
+                    all_image_candidates = [Candidate("", 0, heading, pitch)]
             else:
                 if cancel_event is not None and cancel_event.is_set():
                     logger.info(f"Cancelled before fetching ({latitude}, {longitude}) — skipping.")
-                    return DetectionResult(
-                        success=False,
-                        latitude=latitude,
-                        longitude=longitude,
-                        error="Cancelled",
+                    return self._finish_result(
+                        self._unsuccessful_result(
+                            DetectionOutcome.CANCELLED, latitude, longitude, (0, 0)
+                        )
                     )
 
+                camera = self.street_view.resolve_camera(latitude, longitude)
                 _base_heading = heading
-                road_heading: float | None = None
-
+                road_heading = camera.road_heading
                 if _base_heading is None:
-                    try:
-                        cam_lat, cam_lng, road_heading = self.street_view.get_pano_location(
-                            latitude, longitude
-                        )
-                        _base_heading = StreetViewFetcher.calculate_heading(
-                            cam_lat, cam_lng, latitude, longitude
-                        )
-                        logger.info(
-                            f"Heading pano->target: {_base_heading:.1f}° "
-                            f"(road_heading from API: {road_heading})"
-                        )
-                    except NoImageryAvailable:
-                        raise
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not compute heading (%s). Using 0°.", type(exc).__name__
-                        )
-                        _base_heading = 0
+                    _base_heading = StreetViewFetcher.heading_to_target(camera, latitude, longitude)
+                    logger.info(
+                        "Heading camera->target: %.1f° (road heading from API: %s)",
+                        _base_heading,
+                        road_heading,
+                    )
 
                 if road_heading is None:
                     logger.warning("road_heading unavailable — using camera-to-target heading.")
@@ -198,8 +173,7 @@ class DoorNumberDetector:
                 # Pass 1 — direct heading, normal offsets (±30°)
                 logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
                 all_image_candidates = self.sweep.fetch_candidates(
-                    latitude,
-                    longitude,
+                    camera,
                     _base_heading,
                     pass_label="direct",
                     pitch_override=pitch,
@@ -208,122 +182,64 @@ class DoorNumberDetector:
                     save_debug_image=self._save_debug_image,
                 )
 
-            if not all_image_candidates:
-                logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
-                return DetectionResult(
-                    success=False,
-                    latitude=latitude,
-                    longitude=longitude,
-                    error="Image unavailable",
+            if cancel_event is not None and cancel_event.is_set():
+                return self._finish_result(
+                    self._unsuccessful_result(
+                        DetectionOutcome.CANCELLED,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
+                    )
                 )
 
-            confident_votes = Counter(
-                c["number"]
-                for c in all_image_candidates
-                if c["number"] and c["confidence"] >= self.config.confidence_threshold
-            )
+            if not all_image_candidates:
+                logger.warning(f"Unable to retrieve any image for {latitude}, {longitude}")
+                return self._finish_result(
+                    self._unsuccessful_result(
+                        DetectionOutcome.IMAGE_UNAVAILABLE,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
+                    )
+                )
 
-            best_candidate = max(
-                all_image_candidates,
-                key=lambda c: (
-                    c["confidence"],
-                    confident_votes.get(c["number"], 0),
-                    len(c["number"]) if c["number"] else 0,
-                ),
-            )
+            decision = self.candidate_selector.select(all_image_candidates)
+            if decision is None:
+                raise RuntimeError("Candidate selection returned no result for fetched images")
 
-            door_number = best_candidate["number"]
-            confidence = best_candidate["confidence"]
-            heading = best_candidate["heading"]
-            pitch = best_candidate["pitch"]
+            door_number = decision.candidate.number
+            confidence = decision.candidate.confidence
+            heading = decision.candidate.heading_offset
+            pitch = decision.candidate.pitch
 
             logger.info(
                 f"Best across all passes: '{door_number}' ({confidence}%) "
                 f"at heading_offset={heading} pitch={pitch}"
             )
 
-            if door_number and self._is_bad_candidate(door_number):
-                sorted_candidates = sorted(
-                    all_image_candidates,
-                    key=lambda c: (c["confidence"], len(c["number"]) if c["number"] else 0),
-                    reverse=True,
-                )
-
-                clean_alternative = next(
-                    (
-                        c
-                        for c in sorted_candidates
-                        if c["number"]
-                        and c["number"] != door_number
-                        and not self._is_bad_candidate(c["number"])
-                        and c["number"] not in BLOCKLIST
-                        and c["confidence"] >= self.config.confidence_threshold
-                    ),
-                    None,
-                )
-
-                if clean_alternative:
-                    logger.info(
-                        f"Substituting '{door_number}' ({confidence}%) "
-                        f"with clean candidate '{clean_alternative['number']}' "
-                        f"({clean_alternative['confidence']}%)"
-                    )
-                    door_number = clean_alternative["number"]
-                    confidence = clean_alternative["confidence"]
-                    heading = clean_alternative["heading"]
-                    pitch = clean_alternative["pitch"]
-
-                elif self._is_year_like(door_number):
-                    tier2_alternative = next(
-                        (
-                            c
-                            for c in sorted_candidates
-                            if c["number"]
-                            and c["number"] != door_number
-                            and self._is_suspicious_short(c["number"])
-                            and c["number"] not in BLOCKLIST
-                            and c["confidence"] >= self.config.confidence_threshold
-                        ),
-                        None,
-                    )
-
-                    if tier2_alternative:
-                        logger.info(
-                            f"No clean alternative found — substituting Tier 1 "
-                            f"'{door_number}' ({confidence}%) with Tier 2 fallback "
-                            f"'{tier2_alternative['number']}' "
-                            f"({tier2_alternative['confidence']}%)"
-                        )
-                        door_number = tier2_alternative["number"]
-                        confidence = tier2_alternative["confidence"]
-                        heading = tier2_alternative["heading"]
-                        pitch = tier2_alternative["pitch"]
-                    else:
-                        logger.info(
-                            f"No clean or Tier 2 alternative found — keeping Tier 1 '{door_number}'"
-                        )
-                else:
-                    logger.info(
-                        f"Best is Tier 2 suspicious short '{door_number}' "
-                        f"with no clean alternative — keeping it"
-                    )
-
-            success = bool(door_number and confidence >= self.config.confidence_threshold)
+            success = decision.accepted
             error = None
             if not success:
                 error = (
                     f"Low confidence ({confidence}%). "
                     f"Requires at least {self.config.confidence_threshold}% to pass."
                 )
+            outcome = DetectionOutcome.FOUND if success else DetectionOutcome.LOW_CONFIDENCE
+            details = OUTCOME_DETAILS[outcome]
+            image_calls, metadata_calls = self._usage_since(usage_before, track_usage)
             result = DetectionResult(
                 success=success,
+                outcome=outcome,
                 latitude=latitude,
                 longitude=longitude,
                 door_number=door_number if success else None,
                 confidence=confidence,
                 heading=heading,
                 pitch=pitch,
+                observation=details.observation,
                 error=error,
+                image_calls=image_calls,
+                metadata_calls=metadata_calls,
             )
 
             if not success:
@@ -333,31 +249,52 @@ class DoorNumberDetector:
             else:
                 logger.info(f"Result: {door_number} (confidence: {confidence}%)")
 
-            self.db.save_result(result.to_dict())
-            return result
+            return self._finish_result(result)
 
         except NoImageryAvailable:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(f"Cancelled while resolving imagery for ({latitude}, {longitude}).")
+                return self._finish_result(
+                    self._unsuccessful_result(
+                        DetectionOutcome.CANCELLED,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
+                    )
+                )
             logger.warning(
                 f"No Street View imagery available for ({latitude}, {longitude}) — "
                 f"skipping OCR and recording observation."
             )
-            result = DetectionResult(
-                success=False,
-                latitude=latitude,
-                longitude=longitude,
-                observation="No Street View imagery available",
+            return self._finish_result(
+                self._unsuccessful_result(
+                    DetectionOutcome.NO_IMAGERY,
+                    latitude,
+                    longitude,
+                    self._usage_since(usage_before, track_usage),
+                )
             )
-            self.db.save_result(result.to_dict())
-            return result
 
         except Exception as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(f"Cancelled while processing ({latitude}, {longitude}).")
+                return self._finish_result(
+                    self._unsuccessful_result(
+                        DetectionOutcome.CANCELLED,
+                        latitude,
+                        longitude,
+                        self._usage_since(usage_before, track_usage),
+                    )
+                )
             message = redact_api_key(str(exc))
             logger.error(f"Error processing coordinate: {message}", exc_info=True)
-            return DetectionResult(
-                success=False,
-                latitude=latitude,
-                longitude=longitude,
-                error=message,
+            return self._finish_result(
+                self._unsuccessful_result(
+                    DetectionOutcome.FAILED,
+                    latitude,
+                    longitude,
+                    self._usage_since(usage_before, track_usage),
+                )
             )
 
     def process_coordinates_batch(self, coordinates_list: list) -> list:

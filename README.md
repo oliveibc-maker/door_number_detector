@@ -165,7 +165,17 @@ Each run writes two files under `APP_DATA_DIR/outputs`:
 | `CONFIDENCE` | OCR confidence (%) |
 | `PREDICTION_FOUND` | `YES` / `NO` / `NO_IMAGERY` |
 | `MATCH` | `YES` if the prediction matches the expected value, otherwise `NO` |
-| `OBSERVATION` | Additional result detail, including no-imagery status |
+| `OBSERVATION` | Empty when found; otherwise explains low confidence, missing imagery, unavailable images, or detection failure |
+
+A detection cancelled mid-run writes no CSV row and no database row, so resume picks that coordinate up again. Its Street View calls still count in the metrics.
+
+### SQLite results
+
+Every finished detection is saved to the `door_detection_results` table. `status` is `success` when a door number was found and `error` otherwise. For non-found rows, `error_message` holds the same fixed reason as the CSV `OBSERVATION`; internal error details stay in the log only.
+
+### Single-coordinate analysis (`POST /api/analyze`)
+
+Form fields: `latitude`, `longitude`, and optional `heading` (0–359) and `pitch`. Leave `heading` blank to aim the camera at the target coordinate; a supplied heading is used as given. The JSON response keeps its existing fields and adds `outcome` (`found`, `low_confidence`, `no_imagery`, `image_unavailable`, `cancelled` or `failed`) plus `image_calls` and `metadata_calls`, the Street View requests made for that detection.
 
 ### Offline CSV viewer
 
@@ -184,8 +194,10 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 ├── src/door_number_detector/
 │   ├── cli.py                    # CLI entry point (door-number-detector)
 │   ├── logging_config.py         # Rotating root logger with API-key redaction
+│   ├── runtime.py                # Process startup and shutdown order
 │   ├── core/
 │   │   ├── batch.py              # Shared CSV/resume/detection orchestration
+│   │   ├── candidate_selection.py # Shared candidate ranking and selection policy
 │   │   ├── config.py             # Environment configuration
 │   │   ├── database.py           # SQLite result persistence
 │   │   ├── detector.py           # Detection coordinator
@@ -193,6 +205,7 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 │   │   ├── metrics.py            # Per-run performance and cost metrics
 │   │   ├── models.py             # Typed detection result
 │   │   ├── ocr.py                # PaddleOCR image processing and scoring
+│   │   ├── outcomes.py           # Outcome mapping for CSV, database, and metrics
 │   │   ├── parsing.py            # OCR text parsing
 │   │   ├── redaction.py          # API-key redaction helper
 │   │   ├── sweep.py              # Street View image sweep
