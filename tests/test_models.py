@@ -2,6 +2,16 @@ import unittest
 from datetime import datetime
 
 from door_number_detector.core.models import DetectionOutcome, DetectionResult
+from door_number_detector.core.outcomes import OUTCOME_DETAILS
+
+
+class OutcomeObservationTests(unittest.TestCase):
+    def test_observations_avoid_the_csv_delimiter_and_quotes(self):
+        # The offline results viewer splits rows on ';' without handling quoting.
+        for outcome, details in OUTCOME_DETAILS.items():
+            with self.subTest(outcome=outcome):
+                self.assertNotIn(";", details.observation)
+                self.assertNotIn('"', details.observation)
 
 
 class DetectionResultTests(unittest.TestCase):

@@ -442,7 +442,7 @@ class BatchTests(unittest.TestCase):
             (DetectionOutcome.FOUND, row("12A", "90", "YES", "YES", ""), True, False),
             (
                 DetectionOutcome.LOW_CONFIDENCE,
-                row("", "35", "NO", "NO", "Low confidence; manual review recommended."),
+                row("", "35", "NO", "NO", "Low confidence, manual review recommended."),
                 False,
                 False,
             ),

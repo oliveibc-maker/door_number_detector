@@ -276,7 +276,7 @@ class DetectorDependencyTests(unittest.TestCase):
                 DetectionOutcome.LOW_CONFIDENCE,
                 FakeStreetView(),
                 FakeOCR([page(("17", 0.35))]),
-                "Low confidence; manual review recommended.",
+                "Low confidence, manual review recommended.",
                 (91, 1),
             ),
             (

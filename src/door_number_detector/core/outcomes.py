@@ -41,7 +41,7 @@ OUTCOME_DETAILS = {
         metrics_success=True,
         metrics_no_imagery=False,
     ),
-    DetectionOutcome.LOW_CONFIDENCE: _not_found("Low confidence; manual review recommended."),
+    DetectionOutcome.LOW_CONFIDENCE: _not_found("Low confidence, manual review recommended."),
     DetectionOutcome.NO_IMAGERY: _not_found(
         "No Street View imagery available", token="NO_IMAGERY", no_imagery=True
     ),
