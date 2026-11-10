@@ -1,5 +1,6 @@
 """Validated planner actions for guided Street View search."""
 
+import asyncio
 import base64
 import json
 import math
@@ -11,7 +12,7 @@ from ipaddress import ip_address
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-import requests
+import httpx
 from PIL import Image
 
 from door_number_detector.core.candidate_selection import Candidate, CandidateSelector
@@ -97,7 +98,14 @@ class LocalHTTPPlanner:
     _MAX_RESPONSE_CHARS = 8192
     _MAX_RESPONSE_BYTES = 64 * 1024
 
-    def __init__(self, chat_url: str, model: str, *, timeout: float = 300, session=None):
+    def __init__(
+        self,
+        chat_url: str,
+        model: str,
+        *,
+        timeout: float = 300,
+        client_factory=None,
+    ):
         parsed = urlsplit(chat_url)
         try:
             hostname = parsed.hostname or ""
@@ -129,8 +137,8 @@ class LocalHTTPPlanner:
         self.chat_url = chat_url
         self.model = model.strip()
         self.timeout = float(timeout)
-        self.session = session if session is not None else requests.Session()
-        self.session.trust_env = False
+        self.client_factory = client_factory or httpx.AsyncClient
+        self.closed = False
 
     def plan(
         self,
@@ -142,6 +150,33 @@ class LocalHTTPPlanner:
         available_panoramas: tuple[dict[str, object], ...] = (),
         cancel_event=None,
     ) -> object:
+        if self.closed:
+            raise RuntimeError("local model planner is closed")
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(
+                self._plan_async(
+                    image=image,
+                    view=view,
+                    observations=observations,
+                    history=history,
+                    available_panoramas=available_panoramas,
+                    cancel_event=cancel_event,
+                )
+            )
+        raise RuntimeError("synchronous planner cannot run inside an active asyncio event loop")
+
+    async def _plan_async(
+        self,
+        *,
+        image: Image.Image,
+        view: GuidedView,
+        observations: tuple[OCRObservation, ...],
+        history: tuple[dict[str, object], ...],
+        available_panoramas: tuple[dict[str, object], ...],
+        cancel_event=None,
+    ) -> dict[str, object]:
         if cancel_event is not None and cancel_event.is_set():
             raise RuntimeError("guided search cancelled")
         image_buffer = BytesIO()
@@ -179,7 +214,8 @@ class LocalHTTPPlanner:
                         "Inspect the current Street View image for a door-number search. "
                         "Return exactly one JSON action. Use OCR observation IDs for candidates; "
                         "never invent a number. Allowed action shapes: inspect_region with box "
-                        "and fov; adjust_view with heading, pitch, and fov; candidate with "
+                        "and fov; try_location with box and fov; adjust_view with heading, pitch, "
+                        "and fov; candidate with "
                         "observation_ids; move_panorama with an available panorama_id; stop "
                         "with reason search_complete. Do not output coordinates, tools, or prose."
                     ),
@@ -196,50 +232,67 @@ class LocalHTTPPlanner:
                 },
             ],
         }
-        response = self.session.post(
-            self.chat_url,
-            json=request,
-            timeout=self.timeout,
-            allow_redirects=False,
-            stream=True,
-        )
+        request_task = asyncio.create_task(self._send_request(request))
+        if cancel_event is None:
+            return await request_task
+        cancel_task = asyncio.create_task(self._wait_for_cancel(cancel_event))
         try:
-            if 300 <= response.status_code < 400:
-                raise ValueError("local model endpoint redirects are not allowed")
-            response.raise_for_status()
-            response_chunks = []
-            response_bytes = 0
-            for chunk in response.iter_content(chunk_size=8192):
-                if not chunk:
-                    continue
-                response_bytes += len(chunk)
-                if response_bytes > self._MAX_RESPONSE_BYTES:
-                    raise ValueError("local model response exceeds the configured size limit")
-                response_chunks.append(chunk)
-            try:
-                body = json.loads(b"".join(response_chunks))
-            except json.JSONDecodeError as exc:
-                raise ValueError("local model response is not JSON") from exc
-            try:
-                content = body["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError) as exc:
-                raise ValueError("local model response has an invalid shape") from exc
-            if not isinstance(content, str) or len(content) > self._MAX_RESPONSE_CHARS:
-                raise ValueError("local model response is invalid or too large")
-            try:
-                action = json.loads(content)
-            except json.JSONDecodeError as exc:
-                raise ValueError("local model action is not JSON") from exc
-            if not isinstance(action, dict):
-                raise ValueError("local model action must be an object")
+            done, _ = await asyncio.wait(
+                {request_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if cancel_task in done:
+                request_task.cancel()
+                await asyncio.gather(request_task, return_exceptions=True)
+                raise RuntimeError("guided search cancelled")
+            return request_task.result()
         finally:
-            response.close()
-        if cancel_event is not None and cancel_event.is_set():
-            raise RuntimeError("guided search cancelled")
-        return action
+            cancel_task.cancel()
+            await asyncio.gather(cancel_task, return_exceptions=True)
+
+    async def _send_request(self, request: dict[str, Any]) -> dict[str, object]:
+        async with self.client_factory(
+            trust_env=False,
+            follow_redirects=False,
+            timeout=self.timeout,
+        ) as client:
+            async with client.stream("POST", self.chat_url, json=request) as response:
+                if 300 <= response.status_code < 400:
+                    raise ValueError("local model endpoint redirects are not allowed")
+                response.raise_for_status()
+                response_chunks = []
+                response_bytes = 0
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    response_bytes += len(chunk)
+                    if response_bytes > self._MAX_RESPONSE_BYTES:
+                        raise ValueError("local model response exceeds the configured size limit")
+                    response_chunks.append(chunk)
+                try:
+                    body = json.loads(b"".join(response_chunks))
+                except json.JSONDecodeError as exc:
+                    raise ValueError("local model response is not JSON") from exc
+                try:
+                    content = body["choices"][0]["message"]["content"]
+                except (KeyError, IndexError, TypeError) as exc:
+                    raise ValueError("local model response has an invalid shape") from exc
+                if not isinstance(content, str) or len(content) > self._MAX_RESPONSE_CHARS:
+                    raise ValueError("local model response is invalid or too large")
+                try:
+                    action = json.loads(content)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("local model action is not JSON") from exc
+                if not isinstance(action, dict):
+                    raise ValueError("local model action must be an object")
+                return action
+
+    @staticmethod
+    async def _wait_for_cancel(cancel_event) -> None:
+        while not cancel_event.is_set():
+            await asyncio.sleep(0.05)
 
     def close(self) -> None:
-        self.session.close()
+        self.closed = True
 
 
 def _number(value: object, name: str) -> float:
@@ -263,6 +316,15 @@ def _fov(value: object) -> int:
     return value
 
 
+def _normalized_box(value: object) -> tuple[float, float, float, float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise ValueError("box must contain normalized x, y, width, and height")
+    x, y, width, height = (_number(part, "box coordinate") for part in value)
+    if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1:
+        raise ValueError("box must be a non-empty region within the image")
+    return x, y, width, height
+
+
 def _fields(action: Mapping, expected: set[str]) -> None:
     if set(action) != expected:
         raise ValueError("action fields do not match its type")
@@ -282,13 +344,7 @@ def parse_action(
 
     if kind == "inspect_region":
         _fields(value, {"type", "box", "fov"})
-        box = value["box"]
-        if not isinstance(box, (list, tuple)) or len(box) != 4:
-            raise ValueError("box must contain normalized x, y, width, and height")
-        x, y, width, height = (_number(part, "box coordinate") for part in box)
-        if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1:
-            raise ValueError("box must be a non-empty region within the image")
-        return GuidedAction(kind, box=(x, y, width, height), fov=_fov(value["fov"]))
+        return GuidedAction(kind, box=_normalized_box(value["box"]), fov=_fov(value["fov"]))
 
     if kind == "adjust_view":
         _fields(value, {"type", "heading", "pitch", "fov"})
@@ -306,11 +362,8 @@ def parse_action(
         )
 
     if kind == "try_location":
-        _fields(value, {"type", "location_id"})
-        location_id = _identifier(value["location_id"], "location_id")
-        if location_id not in allowed_location_ids:
-            raise ValueError("location_id was not observed by the application")
-        return GuidedAction(kind, location_id=location_id)
+        _fields(value, {"type", "box", "fov"})
+        return GuidedAction(kind, box=_normalized_box(value["box"]), fov=_fov(value["fov"]))
 
     if kind == "move_panorama":
         _fields(value, {"type", "panorama_id"})
@@ -541,6 +594,12 @@ class GuidedSearch:
             if action.kind == "inspect_region":
                 assert action.box is not None and action.fov is not None
                 if action.fov >= current_view.fov:
+                    return finish("invalid_action")
+                alternative_view = None
+                next_view = self._region_view(current_view, current_image, action)
+            elif action.kind == "try_location":
+                assert action.fov is not None
+                if action.fov > current_view.fov:
                     return finish("invalid_action")
                 alternative_view = None
                 next_view = self._region_view(current_view, current_image, action)

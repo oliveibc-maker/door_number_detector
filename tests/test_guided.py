@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import threading
@@ -90,23 +91,32 @@ class FakeHttpResponse:
     def json(self):
         return {"choices": [{"message": {"content": self.content}}]}
 
-    def iter_content(self, chunk_size):
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _traceback):
+        self.closed = True
+
+    async def aiter_bytes(self, chunk_size):
         payload = json.dumps(self.json()).encode("utf-8")
         for offset in range(0, len(payload), chunk_size):
             yield payload[offset : offset + chunk_size]
 
-    def close(self):
-        self.closed = True
-
 
 class FakeHttpSession:
-    def __init__(self, response):
+    def __init__(self, response, **options):
         self.response = response
-        self.trust_env = True
+        self.options = options
         self.calls = []
 
-    def post(self, url, **kwargs):
-        self.calls.append((url, kwargs))
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _traceback):
+        return None
+
+    def stream(self, method, url, **kwargs):
+        self.calls.append((method, url, kwargs))
         return self.response
 
 
@@ -177,16 +187,17 @@ class GuidedActionTests(unittest.TestCase):
 
     def test_location_change_must_reference_an_observed_location(self):
         action = parse_action(
-            {"type": "try_location", "location_id": "door-1"},
+            {"type": "try_location", "box": [0.7, 0.2, 0.2, 0.3], "fov": 40},
             allowed_location_ids={"door-1"},
             allowed_panorama_ids=set(),
             allowed_observation_ids=set(),
         )
 
-        self.assertEqual(action.location_id, "door-1")
+        self.assertEqual(action.kind, "try_location")
+        self.assertEqual(action.box, (0.7, 0.2, 0.2, 0.3))
         with self.assertRaises(ValueError):
             parse_action(
-                {"type": "try_location", "location_id": "invented"},
+                {"type": "try_location", "box": [0.9, 0.2, 0.2, 0.3], "fov": 40},
                 allowed_location_ids={"door-1"},
                 allowed_panorama_ids=set(),
                 allowed_observation_ids=set(),
@@ -253,6 +264,22 @@ class GuidedSearchTests(unittest.TestCase):
             [request[1:] for request in street_view.requests], [(90, 0, 90), (120, -5, 40)]
         )
         self.assertEqual(len(ocr.images), 2)
+
+    def test_try_location_aims_at_a_validated_other_region(self):
+        planner = ScriptedPlanner(
+            [
+                {"type": "try_location", "box": [0.7, 0.2, 0.2, 0.3], "fov": 40},
+                {"type": "candidate", "observation_ids": ["image-2-ocr-1"]},
+            ]
+        )
+
+        result, street_view, _ = self._make_search(planner)
+
+        self.assertEqual(result.stop_reason, "candidate_found")
+        self.assertEqual(len(street_view.requests), 2)
+        self.assertEqual(street_view.requests[1][3], 40)
+        self.assertNotEqual(street_view.requests[1][2], 0)
+        self.assertGreater(street_view.requests[1][1], 90)
 
     def test_image_budget_stops_without_a_fallback_request(self):
         planner = ScriptedPlanner([{"type": "adjust_view", "heading": 120, "pitch": 0, "fov": 40}])
@@ -447,11 +474,18 @@ class GuidedConfigTests(unittest.TestCase):
 
 class LocalHTTPPlannerTests(unittest.TestCase):
     def test_posts_only_to_loopback_and_returns_structured_action(self):
-        session = FakeHttpSession(FakeHttpResponse('{"type":"stop","reason":"search_complete"}'))
+        response = FakeHttpResponse('{"type":"stop","reason":"search_complete"}')
+        clients = []
+
+        def client_factory(**options):
+            client = FakeHttpSession(response, **options)
+            clients.append(client)
+            return client
+
         planner = LocalHTTPPlanner(
             "http://127.0.0.1:11434/v1/chat/completions",
             "vision-model",
-            session=session,
+            client_factory=client_factory,
         )
 
         action = planner.plan(
@@ -462,17 +496,20 @@ class LocalHTTPPlannerTests(unittest.TestCase):
         )
 
         self.assertEqual(action, {"type": "stop", "reason": "search_complete"})
-        self.assertFalse(session.trust_env)
-        url, request = session.calls[0]
+        session = clients[0]
+        self.assertEqual(
+            session.options,
+            {"trust_env": False, "follow_redirects": False, "timeout": 300.0},
+        )
+        _, url, request = session.calls[0]
         self.assertEqual(url, "http://127.0.0.1:11434/v1/chat/completions")
-        self.assertFalse(request["allow_redirects"])
-        self.assertTrue(request["stream"])
-        self.assertTrue(request["timeout"])
+        self.assertNotIn("timeout", request)
         self.assertTrue(session.response.closed)
         self.assertEqual(request["json"]["model"], "vision-model")
         user_content = request["json"]["messages"][1]["content"]
         self.assertIn("image-1-ocr-1", user_content[0]["text"])
         self.assertEqual(user_content[1]["type"], "image_url")
+        self.assertIn("try_location", request["json"]["messages"][0]["content"])
 
     def test_rejects_non_loopback_endpoint(self):
         with self.assertRaises(ValueError):
@@ -482,7 +519,9 @@ class LocalHTTPPlannerTests(unittest.TestCase):
         planner = LocalHTTPPlanner(
             "http://localhost:11434/v1/chat/completions",
             "vision-model",
-            session=FakeHttpSession(FakeHttpResponse("", status_code=302)),
+            client_factory=lambda **options: FakeHttpSession(
+                FakeHttpResponse("", status_code=302), **options
+            ),
         )
 
         with self.assertRaises(ValueError):
@@ -497,7 +536,9 @@ class LocalHTTPPlannerTests(unittest.TestCase):
         planner = LocalHTTPPlanner(
             "http://localhost:11434/v1/chat/completions",
             "vision-model",
-            session=FakeHttpSession(FakeHttpResponse("not json")),
+            client_factory=lambda **options: FakeHttpSession(
+                FakeHttpResponse("not json"), **options
+            ),
         )
 
         with self.assertRaises(ValueError):
@@ -512,7 +553,9 @@ class LocalHTTPPlannerTests(unittest.TestCase):
         planner = LocalHTTPPlanner(
             "http://localhost:11434/v1/chat/completions",
             "vision-model",
-            session=FakeHttpSession(FakeHttpResponse("x" * (70 * 1024))),
+            client_factory=lambda **options: FakeHttpSession(
+                FakeHttpResponse("x" * (70 * 1024)), **options
+            ),
         )
 
         with self.assertRaises(ValueError):
@@ -522,6 +565,54 @@ class LocalHTTPPlannerTests(unittest.TestCase):
                 observations=(),
                 history=(),
             )
+
+    def test_cancellation_interrupts_the_local_http_wait_and_closes_response(self):
+        entered_stream = threading.Event()
+        response_closed = threading.Event()
+
+        class BlockingResponse(FakeHttpResponse):
+            async def __aexit__(self, _exc_type, _exc, _traceback):
+                self.closed = True
+                response_closed.set()
+
+            async def aiter_bytes(self, chunk_size):
+                entered_stream.set()
+                await asyncio.Event().wait()
+                yield b""
+
+        response = BlockingResponse("")
+        client = FakeHttpSession(response)
+        planner = LocalHTTPPlanner(
+            "http://localhost:11434/v1/chat/completions",
+            "vision-model",
+            client_factory=lambda **options: client,
+        )
+        cancel_event = threading.Event()
+        errors = []
+
+        def call_planner():
+            try:
+                planner.plan(
+                    image=Image.new("RGB", (8, 8)),
+                    view=GuidedView(90, 0, 90),
+                    observations=(),
+                    history=(),
+                    cancel_event=cancel_event,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=call_planner)
+        worker.start()
+        entered = entered_stream.wait(timeout=2)
+        cancel_event.set()
+        worker.join(timeout=2)
+
+        self.assertTrue(entered, errors)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(response_closed.is_set())
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], RuntimeError)
 
 
 if __name__ == "__main__":
