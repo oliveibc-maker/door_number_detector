@@ -8,7 +8,10 @@ flowchart TD
     F --> G["Resolver a câmara do Street View uma vez por deteção"]
     G --> H{"Panorama encontrado?"}
     H -->|Não: ZERO_RESULTS| I["Resultado: sem imagens"]
-    H -->|"Sim, ou consulta falhou (usar a coordenada)"| J["Percorrer direções, inclinações e FOV"]
+    H -->|"Sim, ou consulta falhou (usar a coordenada)"| STR{"Estratégia de deteção?"}
+    STR -->|Varrimento (predefinido)| J["Percorrer direções, inclinações e FOV"]
+    STR -->|Guiada, opcional| GW["Iniciar vista ampla guiada"]
+    GW --> K
     J --> K["Obter imagem a partir da câmara resolvida"]
     K --> L{"Imagem utilizável?"}
     L -->|Não| M{"Há mais tentativas?"}
@@ -21,6 +24,11 @@ flowchart TD
     P --> Q{"Melhor candidato limpo e acima do limiar?"}
     Q -->|"Não, ou fragmento de ano/marca de água"| M
     Q -->|Sim: paragem antecipada| R["Seleção de candidatos: ordenar por confiança, votos, comprimento; substituir números suspeitos"]
+    O --> GP["Planeador local escolhe uma ação limitada usando a imagem e evidência OCR"]
+    GP --> GA{"Ação guiada?"}
+    GA -->|Orientar ou ampliar| GV["Validar parâmetros, evitar vistas repetidas e reservar limites"] --> K
+    GA -->|Mudar de panorama| GN["Escolher apenas panorama próximo, não visitado e descoberto por metadados"] --> GW
+    GA -->|Candidato, paragem ou limite| R
     R --> R2{"Vencedor acima do limiar?"}
     R2 -->|Sim| R3["Resultado: encontrado"]
     R2 -->|Não| R4["Resultado: confiança baixa"]

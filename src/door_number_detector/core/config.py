@@ -1,5 +1,6 @@
 """Project configuration management."""
 
+import math
 import os
 from pathlib import Path
 
@@ -15,6 +16,28 @@ def _optional_yes_no(name: str) -> str | None:
     if value in {"false", "no"}:
         return "no"
     raise ValueError(f"{name} must be True or False.")
+
+
+def _positive_int(name: str, default: int) -> int:
+    value = os.getenv(name, str(default)).strip()
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if parsed <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return parsed
+
+
+def _positive_float(name: str, default: float) -> float:
+    value = os.getenv(name, str(default)).strip()
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive number.") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"{name} must be a positive number.")
+    return parsed
 
 
 class Config:
@@ -139,6 +162,45 @@ class Config:
         return os.getenv("SRC_DB_PASSWORD", "")
 
     # ── Detection ──────────────────────────────────────────────────────────────
+    @property
+    def detection_strategy(self):
+        strategy = os.getenv("DETECTION_STRATEGY", "sweep").strip().lower()
+        if strategy not in {"sweep", "guided"}:
+            raise ValueError("DETECTION_STRATEGY must be 'sweep' or 'guided'.")
+        return strategy
+
+    @property
+    def guided_max_images(self):
+        return _positive_int("GUIDED_MAX_IMAGE_CALLS", 12)
+
+    @property
+    def guided_max_model_calls(self):
+        return _positive_int("GUIDED_MAX_MODEL_CALLS", 16)
+
+    @property
+    def guided_max_panorama_moves(self):
+        return _positive_int("GUIDED_MAX_PANORAMA_MOVES", 2)
+
+    @property
+    def guided_max_metadata_discoveries(self):
+        return _positive_int("GUIDED_MAX_METADATA_DISCOVERIES", 8)
+
+    @property
+    def guided_near_camera_meters(self):
+        return _positive_float("GUIDED_NEAR_CAMERA_METERS", 2.0)
+
+    @property
+    def local_vlm_chat_url(self):
+        return os.getenv("LOCAL_VLM_CHAT_URL", "").strip()
+
+    @property
+    def local_vlm_model(self):
+        return os.getenv("LOCAL_VLM_MODEL", "").strip()
+
+    @property
+    def local_vlm_timeout_seconds(self):
+        return _positive_float("LOCAL_VLM_TIMEOUT_SECONDS", 300)
+
     @property
     def confidence_threshold(self):
         return int(os.getenv("CONFIDENCE_THRESHOLD", "70"))

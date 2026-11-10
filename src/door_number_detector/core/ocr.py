@@ -1,7 +1,9 @@
 """Image OCR and candidate ranking for door-number detection."""
 
 import logging
+import math
 import os
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -13,6 +15,14 @@ from door_number_detector.core.parsing import parse_ocr_text
 # Street View draws its logo and copyright text in the bottom strip of every image.
 WATERMARK_STRIP_FRACTION = 0.06
 WATERMARK_CORNER_WIDTH_FRACTION = 0.15
+
+
+@dataclass(frozen=True)
+class OCRReading:
+    text: str
+    confidence: float
+    box: tuple[float, float, float, float]
+    number_candidates: tuple[str, ...]
 
 
 class DoorNumberOCR:
@@ -46,6 +56,65 @@ class DoorNumberOCR:
             (width * scale, height * scale),
             interpolation=cv2.INTER_CUBIC,
         )
+
+    def extract_observations(self, image: Image.Image) -> list[OCRReading]:
+        """Return OCR lines with boxes normalized to the supplied image dimensions."""
+        image_width, image_height = image.size
+        if image_width <= 0 or image_height <= 0:
+            return []
+        cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        height = cv_image.shape[0]
+        watermark_height = int(height * WATERMARK_STRIP_FRACTION)
+        watermark_width = int(cv_image.shape[1] * WATERMARK_CORNER_WIDTH_FRACTION)
+        if watermark_height and watermark_width:
+            cv_image[height - watermark_height :, :watermark_width] = 0
+            cv_image[height - watermark_height :, -watermark_width:] = 0
+        scan_image = self._upscale(cv_image, scale=2)
+        ocr_result = self.reader.ocr(scan_image)
+        if not ocr_result:
+            return []
+        if (
+            isinstance(ocr_result[0], list)
+            and len(ocr_result[0]) >= 2
+            and isinstance(ocr_result[0][1], tuple)
+        ):
+            page = ocr_result
+        else:
+            page = ocr_result[0] or []
+
+        observations: list[OCRReading] = []
+        for line in page:
+            try:
+                polygon, (text, confidence) = line
+                confidence = float(confidence)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(text, str) or not text.strip():
+                continue
+            if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                continue
+            try:
+                points = [(float(point[0]) / 2, float(point[1]) / 2) for point in polygon]
+            except (TypeError, ValueError, IndexError):
+                continue
+            if not points or any(not math.isfinite(axis) for point in points for axis in point):
+                continue
+            left = max(0.0, min(point[0] for point in points))
+            top = max(0.0, min(point[1] for point in points))
+            right = min(float(image_width), max(point[0] for point in points))
+            bottom = min(float(image_height), max(point[1] for point in points))
+            if right <= left or bottom <= top:
+                continue
+            box = (
+                left / image_width,
+                top / image_height,
+                (right - left) / image_width,
+                (bottom - top) / image_height,
+            )
+            observations.append(
+                OCRReading(text.strip(), confidence, box, tuple(parse_ocr_text(text)))
+            )
+        return observations
 
     def extract_door_number(self, image: Image.Image) -> list[Candidate]:
         cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)

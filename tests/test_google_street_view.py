@@ -53,10 +53,15 @@ class FakeSession:
         return self.responses[0]
 
 
-def metadata_response(status="OK"):
-    return FakeResponse(
-        data={"status": status, "location": {"lat": 41.1, "lng": -8.1}, "heading": 35}
-    )
+def metadata_response(status="OK", *, latitude=41.1, longitude=-8.1, pano_id=None):
+    data = {
+        "status": status,
+        "location": {"lat": latitude, "lng": longitude},
+        "heading": 35,
+    }
+    if pano_id is not None:
+        data["pano_id"] = pano_id
+    return FakeResponse(data=data)
 
 
 def image_response(image=None):
@@ -87,6 +92,43 @@ def _formatted(records):
 
 
 class StreetViewClientTests(unittest.TestCase):
+    def test_metadata_retains_panorama_id(self):
+        fetcher = StreetViewFetcher(
+            API_KEY,
+            session=FakeSession([metadata_response(pano_id="pano-1")]),
+        )
+
+        camera = fetcher.resolve_camera(41.0, -8.0)
+
+        self.assertEqual(camera.pano_id, "pano-1")
+
+    def test_image_request_uses_panorama_id_when_available(self):
+        session = FakeSession([image_response()])
+        fetcher = StreetViewFetcher(API_KEY, session=session)
+        camera = CameraPosition(41.1, -8.1, None, False, "pano-1")
+
+        image = fetcher.get_image(camera, 90)
+
+        self.assertIsNotNone(image)
+        self.assertEqual(session.calls[0][1]["pano"], "pano-1")
+        self.assertNotIn("location", session.calls[0][1])
+
+    def test_neighbor_discovery_returns_only_distinct_nearby_panoramas(self):
+        session = FakeSession(
+            [
+                metadata_response(latitude=41.0001, longitude=-8.0, pano_id="pano-1"),
+                metadata_response(latitude=41.002, longitude=-8.0, pano_id="pano-far"),
+            ]
+        )
+        fetcher = StreetViewFetcher(API_KEY, session=session)
+        camera = CameraPosition(41.0, -8.0, None, False, "pano-0")
+
+        neighbors = fetcher.find_neighbor_cameras(camera, heading=0, max_probes=2)
+
+        self.assertEqual([neighbor.camera.pano_id for neighbor in neighbors], ["pano-1"])
+        self.assertLess(neighbors[0].distance_m, 20)
+        self.assertEqual(fetcher.get_call_counts(), (0, 2))
+
     def test_no_panorama_is_the_only_metadata_failure_that_raises(self):
         fetcher = StreetViewFetcher(
             API_KEY, session=FakeSession([metadata_response("ZERO_RESULTS")])

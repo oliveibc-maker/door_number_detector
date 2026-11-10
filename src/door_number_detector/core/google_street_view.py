@@ -22,6 +22,14 @@ class CameraPosition:
     longitude: float
     road_heading: float | None
     fallback: bool
+    pano_id: str | None = None
+
+
+@dataclass(frozen=True)
+class PanoramaNeighbor:
+    camera: CameraPosition
+    distance_m: float
+    relative_bearing: float
 
 
 class NoImageryAvailable(Exception):
@@ -152,7 +160,11 @@ class StreetViewFetcher:
         if road_heading is not None and not math.isfinite(road_heading):
             road_heading = None
 
-        camera = CameraPosition(camera_latitude, camera_longitude, road_heading, False)
+        pano_id = data.get("pano_id")
+        pano_id = pano_id.strip() if isinstance(pano_id, str) else None
+        camera = CameraPosition(
+            camera_latitude, camera_longitude, road_heading, False, pano_id or None
+        )
         self._camera_cache[cache_key] = camera
         self._camera_cache.move_to_end(cache_key)
         if len(self._camera_cache) > self._CAMERA_CACHE_SIZE:
@@ -180,6 +192,68 @@ class StreetViewFetcher:
             camera.latitude, camera.longitude, target_latitude, target_longitude
         )
 
+    @staticmethod
+    def _offset_coordinate(latitude: float, longitude: float, bearing: float, distance_m: float):
+        angle = math.radians(bearing)
+        latitude_offset = distance_m * math.cos(angle) / 111_320
+        longitude_scale = max(abs(math.cos(math.radians(latitude))), 1e-6)
+        longitude_offset = distance_m * math.sin(angle) / (111_320 * longitude_scale)
+        return latitude + latitude_offset, longitude + longitude_offset
+
+    @staticmethod
+    def distance_m(first: CameraPosition, second: CameraPosition) -> float:
+        latitude_delta = math.radians(second.latitude - first.latitude)
+        longitude_delta = math.radians(second.longitude - first.longitude)
+        latitude_first = math.radians(first.latitude)
+        latitude_second = math.radians(second.latitude)
+        haversine = (
+            math.sin(latitude_delta / 2) ** 2
+            + math.cos(latitude_first)
+            * math.cos(latitude_second)
+            * math.sin(longitude_delta / 2) ** 2
+        )
+        return 6_371_000 * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
+
+    def find_neighbor_cameras(
+        self,
+        camera: CameraPosition,
+        *,
+        heading: float,
+        max_probes: int = 8,
+        max_distance_m: float = 35,
+    ) -> list[PanoramaNeighbor]:
+        """Probe a bounded ring for distinct nearby panoramas; the API exposes no adjacency list."""
+        if isinstance(max_probes, bool) or not isinstance(max_probes, int) or max_probes < 0:
+            raise ValueError("max_probes must be a non-negative integer")
+        if not math.isfinite(max_distance_m) or max_distance_m <= 0:
+            raise ValueError("max_distance_m must be positive and finite")
+        if camera.pano_id is None or max_probes == 0:
+            return []
+
+        neighbors: list[PanoramaNeighbor] = []
+        seen_ids = {camera.pano_id}
+        for index in range(min(max_probes, 8)):
+            probe_bearing = (heading + index * 45) % 360
+            latitude, longitude = self._offset_coordinate(
+                camera.latitude, camera.longitude, probe_bearing, 20
+            )
+            try:
+                candidate = self.resolve_camera(latitude, longitude)
+            except NoImageryAvailable:
+                continue
+            if candidate.pano_id is None or candidate.pano_id in seen_ids:
+                continue
+            distance = self.distance_m(camera, candidate)
+            if not 2 <= distance <= max_distance_m:
+                continue
+            seen_ids.add(candidate.pano_id)
+            absolute_bearing = self.heading_to_target(
+                camera, candidate.latitude, candidate.longitude
+            )
+            relative_bearing = (absolute_bearing - heading + 180) % 360 - 180
+            neighbors.append(PanoramaNeighbor(candidate, distance, relative_bearing))
+        return neighbors
+
     # ── Image fetching ─────────────────────────────────────────────────────────
 
     def get_image(
@@ -191,7 +265,6 @@ class StreetViewFetcher:
     ) -> Image.Image | None:
         """Fetch one image from a resolved camera at an absolute heading."""
         params = {
-            "location": f"{camera.latitude},{camera.longitude}",
             "size": self.size,
             "heading": heading % 360,
             "pitch": pitch,
@@ -199,6 +272,10 @@ class StreetViewFetcher:
             "source": "outdoor",
             "key": self.api_key,
         }
+        if camera.pano_id is None:
+            params["location"] = f"{camera.latitude},{camera.longitude}"
+        else:
+            params["pano"] = camera.pano_id
         self._image_call_count += 1
         try:
             response = self._session.get(self.BASE_URL, params=params, timeout=10)

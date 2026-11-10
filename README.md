@@ -62,6 +62,8 @@ SRC_DB_DATABASE=GEO_DB
 SRC_DB_TRUSTED=True
 ~~~
 
+Guided detection is experimental and remains opt-in. `DETECTION_STRATEGY=sweep` is the default. To try guided mode, first get approval for a local vision service, then set `DETECTION_STRATEGY=guided`, `LOCAL_VLM_CHAT_URL`, and `LOCAL_VLM_MODEL`. The service URL must be an HTTP loopback OpenAI-compatible chat-completions endpoint; hosted endpoints and redirects are rejected, and proxy environment settings are not used for model requests. The default per-address ceilings are 12 image calls, 16 model calls, 2 panorama moves, and 8 nearby-panorama metadata discoveries. The default close-camera threshold is 2 m. Override these values with the `GUIDED_*` settings. No automatic sweep fallback occurs on guided errors. Guided accuracy and savings have not yet been evaluated on a labelled sample, and terminal no-building stops remain disabled.
+
 ODBC Driver 18 encrypts connections and rejects self-signed server certificates. Prefer installing the issuing CA; for an internal server you trust, set `SRC_DB_TRUST_SERVER_CERTIFICATE=True` (optionally `SRC_DB_ENCRYPT=True|False`). Both are unset by default, which keeps the driver defaults.
 
 Get a Google Street View API key from: https://developers.google.com/maps/documentation/streetview/get-api-key
@@ -201,10 +203,11 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 │   │   ├── config.py             # Environment configuration
 │   │   ├── database.py           # SQLite result persistence
 │   │   ├── detector.py           # Detection coordinator
+│   │   ├── guided.py             # Bounded opt-in guided search and local planner adapter
 │   │   ├── google_street_view.py # Street View API client
 │   │   ├── metrics.py            # Per-run performance and cost metrics
 │   │   ├── models.py             # Typed detection result
-│   │   ├── ocr.py                # PaddleOCR image processing and scoring
+│   │   ├── ocr.py                # PaddleOCR candidates and guided OCR geometry observations
 │   │   ├── outcomes.py           # Outcome mapping for CSV, database, and metrics
 │   │   ├── parsing.py            # OCR text parsing
 │   │   ├── redaction.py          # API-key redaction helper
@@ -215,7 +218,7 @@ To inspect an existing CSV without starting the server, open `src/door_number_de
 │       ├── healthcheck.py        # Container readiness check
 │       ├── security.py           # Upload, CSRF, and loopback helpers
 │       └── templates/            # Web app and offline CSV viewer
-├── tests/                        # unittest suite for core, sources, OCR, parsing and web
+├── tests/                        # unittest suite for core, guided search, sources, OCR and web
 ├── flowcharts/                   # English/Portuguese Mermaid sources
 ├── scripts/
 │   ├── windows/                  # Windows start/stop scripts

@@ -12,6 +12,7 @@ from door_number_detector.core.candidate_selection import Candidate, CandidateSe
 from door_number_detector.core.config import Config
 from door_number_detector.core.database import DatabaseManager
 from door_number_detector.core.google_street_view import NoImageryAvailable, StreetViewFetcher
+from door_number_detector.core.guided import GuidedSearch, LocalHTTPPlanner, SearchLimits
 from door_number_detector.core.models import DetectionOutcome, DetectionResult
 from door_number_detector.core.ocr import DoorNumberOCR
 from door_number_detector.core.outcomes import OUTCOME_DETAILS
@@ -32,9 +33,13 @@ class DoorNumberDetector:
         database_manager=None,
         street_view_fetcher=None,
         ocr_engine=None,
+        guided_planner=None,
         debug_root: Path | None = None,
     ):
         self.config = config if config is not None else Config(env_path)
+        self.detection_strategy = getattr(self.config, "detection_strategy", "sweep")
+        if self.detection_strategy not in {"sweep", "guided"}:
+            raise ValueError("DETECTION_STRATEGY must be 'sweep' or 'guided'.")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.debug_root = (
             Path(debug_root) if debug_root is not None else self.config.data_dir / "ocr_debug"
@@ -53,6 +58,20 @@ class DoorNumberDetector:
                 https_proxy=self.config.https_proxy,
             )
         )
+        self._local_vlm_planner: LocalHTTPPlanner | None = None
+        if guided_planner is None and self.detection_strategy == "guided":
+            chat_url = getattr(self.config, "local_vlm_chat_url", "")
+            model = getattr(self.config, "local_vlm_model", "")
+            if bool(chat_url) != bool(model):
+                raise ValueError("Set both LOCAL_VLM_CHAT_URL and LOCAL_VLM_MODEL for guided mode.")
+            if not chat_url or not model:
+                raise ValueError("Guided strategy requires a configured local planner.")
+            self._local_vlm_planner = LocalHTTPPlanner(
+                chat_url,
+                model,
+                timeout=getattr(self.config, "local_vlm_timeout_seconds", 300),
+            )
+            guided_planner = self._local_vlm_planner
 
         self.ocr = DoorNumberOCR(reader=ocr_engine, logger=logger)
         self.candidate_selector = CandidateSelector(self.config.confidence_threshold, logger)
@@ -62,6 +81,24 @@ class DoorNumberDetector:
             self.candidate_selector,
             debug=self.config.debug,
             logger=logger,
+        )
+        self.guided_search = (
+            GuidedSearch(
+                self.street_view,
+                self.ocr,
+                guided_planner,
+                self.candidate_selector,
+                limits=SearchLimits(
+                    max_images=getattr(self.config, "guided_max_images", 12),
+                    max_model_calls=getattr(self.config, "guided_max_model_calls", 16),
+                    max_panorama_moves=getattr(self.config, "guided_max_panorama_moves", 2),
+                    max_metadata_discoveries=getattr(
+                        self.config, "guided_max_metadata_discoveries", 8
+                    ),
+                ),
+            )
+            if guided_planner is not None
+            else None
         )
         logger.info("Door Number Detector initialized (OCR engine: PaddleOCR)")
 
@@ -170,17 +207,59 @@ class DoorNumberDetector:
                 if road_heading is None:
                     logger.warning("road_heading unavailable — using camera-to-target heading.")
 
-                # Pass 1 — direct heading, normal offsets (±30°)
-                logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
-                all_image_candidates = self.sweep.fetch_candidates(
-                    camera,
-                    _base_heading,
-                    pass_label="direct",
-                    pitch_override=pitch,
-                    cancel_event=cancel_event,
-                    debug_directory=self.current_debug_house_dir or self.debug_dir,
-                    save_debug_image=self._save_debug_image,
-                )
+                if self.detection_strategy == "guided":
+                    if self.guided_search is None:
+                        raise RuntimeError("Guided strategy requires a configured local planner")
+                    initial_alternative_heading = None
+                    target = type(camera)(latitude, longitude, None, True)
+                    camera_distance = StreetViewFetcher.distance_m(camera, target)
+                    if camera_distance <= getattr(self.config, "guided_near_camera_meters", 2.0):
+                        road_axis = camera.road_heading
+                        if road_axis is not None and heading is None:
+                            _base_heading = road_axis
+                        initial_alternative_heading = (_base_heading + 180) % 360
+                    guided_result = self.guided_search.run(
+                        camera,
+                        initial_heading=_base_heading,
+                        initial_pitch=pitch if pitch is not None else 0,
+                        initial_alternative_heading=initial_alternative_heading,
+                        cancel_event=cancel_event,
+                    )
+                    logger.info(
+                        "Guided search stopped: reason=%s images=%s model_calls=%s panorama_moves=%s",
+                        guided_result.stop_reason,
+                        guided_result.image_calls,
+                        guided_result.model_calls,
+                        guided_result.panorama_moves,
+                    )
+                    if guided_result.stop_reason in {
+                        "image_error",
+                        "ocr_error",
+                        "planner_error",
+                        "invalid_action",
+                        "no_building_not_authorized",
+                    }:
+                        raise RuntimeError(f"Guided search failed: {guided_result.stop_reason}")
+                    all_image_candidates = list(guided_result.candidates)
+                    if (
+                        guided_result.stop_reason == "image_unavailable"
+                        and not all_image_candidates
+                    ):
+                        all_image_candidates = []
+                    elif not all_image_candidates:
+                        all_image_candidates = [Candidate("", 0)]
+                else:
+                    # Pass 1 — direct heading, normal offsets (±30°)
+                    logger.info(f"Pass 1: direct heading {_base_heading:.1f}° (normal sweep ±30°)")
+                    all_image_candidates = self.sweep.fetch_candidates(
+                        camera,
+                        _base_heading,
+                        pass_label="direct",
+                        pitch_override=pitch,
+                        cancel_event=cancel_event,
+                        debug_directory=self.current_debug_house_dir or self.debug_dir,
+                        save_debug_image=self._save_debug_image,
+                    )
 
             if cancel_event is not None and cancel_event.is_set():
                 return self._finish_result(
@@ -312,5 +391,9 @@ class DoorNumberDetector:
         return results
 
     def close(self):
-        self.db.close()
+        try:
+            if self._local_vlm_planner is not None:
+                self._local_vlm_planner.close()
+        finally:
+            self.db.close()
         logger.info("Door Number Detector finished")

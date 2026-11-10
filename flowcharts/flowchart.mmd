@@ -8,7 +8,10 @@ flowchart TD
     F --> G["Resolve Street View camera once per detection"]
     G --> H{"Panorama found?"}
     H -->|No: ZERO_RESULTS| I["Outcome: no imagery"]
-    H -->|"Yes, or lookup failed (use the coordinate)"| J["Sweep heading offsets, pitch, and FOV"]
+    H -->|"Yes, or lookup failed (use the coordinate)"| STR{"Detection strategy?"}
+    STR -->|Sweep (default)| J["Sweep heading offsets, pitch, and FOV"]
+    STR -->|Opt-in guided| GW["Start guided wide view"]
+    GW --> K
     J --> K["Fetch image from the resolved camera"]
     K --> L{"Usable image?"}
     L -->|No| M{"More sweep attempts?"}
@@ -21,6 +24,11 @@ flowchart TD
     P --> Q{"Best candidate clean and at or above threshold?"}
     Q -->|"No, or a year/watermark fragment"| M
     Q -->|Yes: stop early| R["Candidate selection: rank by confidence, votes, length; swap suspicious numbers"]
+    O --> GP["Local planner selects one bounded action using image and OCR evidence"]
+    GP --> GA{"Guided action?"}
+    GA -->|Aim or zoom| GV["Validate settings, deduplicate view, reserve image/model budgets"] --> K
+    GA -->|Move panorama| GN["Select only a bounded, nearby, unseen metadata-discovered panorama"] --> GW
+    GA -->|Candidate, stop, or ceiling| R
     R --> R2{"Winner at or above threshold?"}
     R2 -->|Yes| R3["Outcome: found"]
     R2 -->|No| R4["Outcome: low confidence"]

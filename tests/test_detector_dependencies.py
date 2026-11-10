@@ -106,15 +106,21 @@ class DetectorDependencyTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.data_directory.cleanup()
 
-    def _make_detector(self, database, street_view, ocr):
+    def _make_detector(
+        self, database, street_view, ocr, *, detection_strategy="sweep", guided_planner=None
+    ):
         return self.detector_type(
             config=SimpleNamespace(
-                data_dir=Path(self.data_directory.name), debug=False, confidence_threshold=70
+                data_dir=Path(self.data_directory.name),
+                debug=False,
+                confidence_threshold=70,
+                detection_strategy=detection_strategy,
             ),
             database_manager=database,
             street_view_fetcher=street_view,
             ocr_engine=ocr,
             debug_root=Path(self.data_directory.name) / "debug",
+            guided_planner=guided_planner,
         )
 
     def test_detector_uses_injected_services_for_sweep_and_persistence(self):
@@ -254,6 +260,66 @@ class DetectorDependencyTests(unittest.TestCase):
         self.assertEqual(street_view.resolved, [])
         self.assertEqual(street_view.requests, [])
         self.assertEqual(street_view.get_call_counts(), (0, 0))
+
+    def test_guided_strategy_uses_injected_planner_and_preserves_result_contract(self):
+        class Planner:
+            def plan(self, **kwargs):
+                return {"type": "candidate", "observation_ids": ["image-1-ocr-1"]}
+
+        database = FakeDatabase()
+        street_view = FakeStreetView()
+        detector = self._make_detector(
+            database,
+            street_view,
+            FakeOCR([page(("17", 0.95))]),
+            detection_strategy="guided",
+            guided_planner=Planner(),
+        )
+
+        result = detector.detect_door_number(41.0, -8.0, heading=90)
+
+        self.assertEqual(result.outcome, DetectionOutcome.FOUND)
+        self.assertEqual(result.door_number, "17")
+        self.assertEqual((result.image_calls, result.metadata_calls), (1, 1))
+        self.assertEqual(len(street_view.requests), 1)
+        self.assertEqual(database.saved[0]["outcome"], DetectionOutcome.FOUND)
+
+    def test_guided_strategy_without_a_planner_fails_as_an_existing_outcome(self):
+        with self.assertRaisesRegex(ValueError, "requires a configured local planner"):
+            self._make_detector(
+                FakeDatabase(),
+                FakeStreetView(),
+                FakeOCR(),
+                detection_strategy="guided",
+            )
+
+    def test_guided_near_camera_uses_road_relative_pair_when_first_view_is_unproductive(self):
+        class Planner:
+            def __init__(self):
+                self.actions = iter(
+                    [
+                        {"type": "stop", "reason": "search_complete"},
+                        {"type": "candidate", "observation_ids": ["image-2-ocr-1"]},
+                    ]
+                )
+
+            def plan(self, **kwargs):
+                return next(self.actions)
+
+        street_view = FakeStreetView()
+        street_view.camera = CameraPosition(41.0, -8.0, 40, False)
+        detector = self._make_detector(
+            FakeDatabase(),
+            street_view,
+            FakeOCR([page(("17", 0.95))]),
+            detection_strategy="guided",
+            guided_planner=Planner(),
+        )
+
+        result = detector.detect_door_number(41.0, -8.0)
+
+        self.assertEqual(result.outcome, DetectionOutcome.FOUND)
+        self.assertEqual([request[1]["heading"] for request in street_view.requests], [40, 220])
 
     def test_detector_returns_and_persists_each_finished_outcome(self):
         grey = None  # the client returns nothing for a grey placeholder

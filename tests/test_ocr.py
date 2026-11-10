@@ -111,6 +111,21 @@ class OcrServiceTests(unittest.TestCase):
 
         self.assertEqual(service.extract_door_number(image), [])
 
+    def test_extracts_raw_observations_with_original_image_geometry(self):
+        number_box = [[40, 100], [80, 100], [80, 120], [40, 120]]
+        letter_box = [[90, 100], [100, 100], [100, 120], [90, 120]]
+        reader = FakeOcrReader([[number_box, ("20", 0.9)], [letter_box, ("A", 0.8)]])
+        service = DoorNumberOCR(reader=reader)
+        image = Image.fromarray(np.zeros((200, 100, 3), dtype=np.uint8), mode="RGB")
+
+        observations = service.extract_observations(image)
+
+        self.assertEqual([item.text for item in observations], ["20", "A"])
+        self.assertEqual([item.number_candidates for item in observations], [("20",), ()])
+        self.assertEqual(observations[0].box, (0.2, 0.25, 0.2, 0.05))
+        self.assertEqual(observations[1].box, (0.45, 0.25, 0.05, 0.05))
+        self.assertEqual([item.confidence for item in observations], [0.9, 0.8])
+
 
 if __name__ == "__main__":
     unittest.main()
